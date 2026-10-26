@@ -1,0 +1,16 @@
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+.venv/
+node_modules/
+
+# Generated output
+dist/
+__pycache__/
+
+# Logs
+*.log
+logs/
