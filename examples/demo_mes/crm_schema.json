@@ -1,0 +1,30 @@
+{
+  "system_key": "demo_crm",
+  "tables": [
+    {
+      "schema": "crm",
+      "name": "customer",
+      "description": "고객사 (데모용 가상 CRM)",
+      "columns": [
+        {"name": "customer_id", "type": "bigint", "nullable": false},
+        {"name": "name", "type": "varchar(200)", "nullable": false},
+        {"name": "biz_no", "type": "varchar(12)", "description": "고객사 사업자번호. 하이픈 포함 12자리(000-00-00000)"}
+      ],
+      "primary_key": ["customer_id"],
+      "foreign_keys": []
+    },
+    {
+      "schema": "crm",
+      "name": "sales_order",
+      "description": "수주",
+      "columns": [
+        {"name": "order_id", "type": "bigint", "nullable": false},
+        {"name": "customer_id", "type": "bigint", "nullable": false},
+        {"name": "ordered_at", "type": "timestamp", "nullable": false}
+      ],
+      "primary_key": ["order_id"],
+      "foreign_keys": [{"columns": ["customer_id"], "target_table": "customer", "target_columns": ["customer_id"]}]
+    }
+  ],
+  "samples": []
+}

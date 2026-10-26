@@ -69,7 +69,7 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(second["reused"])
 
     def test_missing_capture_time_does_not_change_idempotency_hash(self) -> None:
-        with patch("buildlog.store._now", side_effect=["2026-10-26T00:00:00Z", "2026-10-26T00:01:00Z"]):
+        with patch("buildlog.db.now", side_effect=["2026-10-26T00:00:00Z", "2026-10-26T00:01:00Z"]):
             first = ingest(self.store, sample_plan())
             second = ingest(self.store, sample_plan())
         self.assertEqual(first["page_id"], second["page_id"])
@@ -122,10 +122,14 @@ class StoreTests(unittest.TestCase):
             {"section_locator": "a", "excerpt": "first", "evidence_kind": "observed"},
             {"section_locator": "b", "excerpt": "second", "evidence_kind": "observed"},
         ]
-        # The second evidence row reuses the first one's id, so its insert fails
-        # after the run, page, source and first evidence rows were written.
-        ids = [uuid.UUID(int=i) for i in (1, 2, 3, 4, 4)]
-        with patch("buildlog.store.uuid.uuid4", side_effect=ids):
+        # Ids are handed out as run, source, evidence 1, evidence 2. The second evidence
+        # row reuses the first one's id, so its insert fails after the run, source and
+        # first evidence rows were already written in the same transaction.
+        def ids():
+            yield from (uuid.UUID(int=i) for i in (1, 2, 3, 3))
+            while True:
+                yield uuid.uuid4()
+        with patch("buildlog.ingest.uuid.uuid4", side_effect=ids()):
             with self.assertRaises(sqlite3.IntegrityError):
                 ingest(self.store, plan)
         self.assertEqual(_row_counts(self.store), before)

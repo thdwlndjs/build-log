@@ -1,0 +1,5 @@
+데모 운영팀 메모 (가상)
+
+- operator_code에는 employee.emp_code 값을 넣는다고 들었다. 하지만 FK는 걸려 있지 않다.
+- 퇴사자 코드가 남아 있어 employee에 없는 operator_code가 있을 수 있다.
+- 센서 데이터를 실시간으로 받는 스트리밍 API가 있는지는 아직 확인하지 못했다.
