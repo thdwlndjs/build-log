@@ -8,6 +8,8 @@
 
 Python 3.12, SQLite, 로컬 CLI와 그래프 검토 UI를 사용한다. Windows PowerShell을 첫 검증 환경으로 삼는다. 사용자 공통 경로의 단일 저장소를 Codex·Claude Code가 함께 사용한다. 프로젝트별 DB로 분할하지 않는다. 경로는 설정 파일과 `--store`로 변경 가능하게 한다.
 
+공통 설정 파일은 `%APPDATA%\Buildlog\config.toml`이며 `BUILDLOG_CONFIG`로 위치를 바꿀 수 있다. 키는 `store`(저장소 경로)와 `agy`(Antigravity CLI 경로)다. 값의 우선순위는 명령 옵션(`--store`, `--agy`) > 환경 변수(`BUILDLOG_STORE`, `BUILDLOG_AGY`) > 설정 파일 > 기본값(`%LOCALAPPDATA%\Buildlog\buildlog.sqlite3`, `%LOCALAPPDATA%\agy\bin\agy.exe`)이다. CLI와 두 호스트 스킬은 이 설정을 공유한다. 알 수 없는 키나 잘못된 TOML은 입력 오류로 거부한다.
+
 | 구성 | 책임 |
 | --- | --- |
 | 호스트 스킬 | 접근 가능한 대화 수집, 경험 선별·해설·용어 정의·관계 제안 |
@@ -73,6 +75,8 @@ SQLite가 기준 원본이다. Markdown 본문은 DB의 TEXT로 보관하고 `.m
 
 위 값은 인터페이스 예시이며 실제 사용자 DB의 사실이 아니다. 업무 데이터를 상시 복제하지 않고 제공된 스키마·필요한 샘플·맥락을 지식으로 정리한다.
 
+`samples`는 선택 입력이다. 각 항목은 `{"table", "rows": [...]}` 또는 `{"table", "format": "csv"|"json", "content"}`이며, 별도 `sample_csv`·`sample_json` 출처와 같은 경로로 처리한다. 앞 50행만 보관하고 자격증명 형태의 컬럼 값은 가리며 테이블·컬럼과 대조한다. 샘플 행은 스키마 출처 원문에 다시 보관하지 않는다. 행을 잘라냈거나, 테이블·컬럼을 찾지 못했거나, 읽지 않은 필드가 있으면 해당 출처를 `partial`로 표시하고 저장 결과 전체 상태도 `partial`로 보고한다. `source_ref`는 출처 메타데이터로 보존한다.
+
 ## 5. 용어·관계·조인·규칙 추출
 
 1. 원문 위치와 시스템 식별자를 확정한다.
@@ -90,6 +94,17 @@ rule kind는 prohibition, requirement, unsupported_operation이다. 각각 적�
 ## 6. 저장 실행·갱신
 
 `received → normalized → planned → committed`로 진행하고 조사 상태를 별도로 관리한다. 인제스트 계획은 pages, term_senses, relations, join_paths, rules, evidence와 예상 버전을 포함한다. idempotency_key와 input_hash가 같으면 기존 실행 결과를 반환하고, 같은 key에 다른 입력이면 `IDEMPOTENCY_CONFLICT`를 반환한다.
+
+단계별 의미:
+
+| 단계 | 내용 | 기록 방식 |
+| --- | --- | --- |
+| received | 실행 기록 생성 또는 실패한 같은 key 실행의 재시도 시작(시도 횟수 증가) | 별도 커밋 |
+| normalized | 입력 검증·정규화 완료, input_hash 기록 | 별도 커밋 |
+| planned | 현재 저장소를 대상으로 전체 계획을 적용해 참조·충돌·스키마를 확인한 뒤 되돌림. 생성·갱신 예정 건수를 기록 | 별도 커밋 |
+| committed | 데이터 저장과 committed 표시를 한 트랜잭션으로 반영 | 데이터와 함께 원자적 커밋 |
+
+실패하면 데이터는 남기지 않고, 실행 기록에 도달한 단계·오류 종류·메시지를 보존한다. 이미 committed된 실행은 실패로 덮어쓰지 않는다. 같은 key로 다시 저장하면 실패한(또는 중단된) 실행 기록을 재사용해 received부터 다시 진행한다(저장 재시도). 수정한 입력으로 재시도할 수 있다. 동시에 같은 key가 들어오면 커밋 트랜잭션 안에서 다시 확인해 한 번만 저장한다. 외부 조사 재개는 저장 재시도와 별개이며 committed 실행의 조사 요청에만 적용한다.
 
 기존 의미·환경과 다르면 무조건 덮어쓰지 않고 새 기록과 관계를 만든다. 기존 경험의 후속 결과라면 해당 버전을 갱신한다. 호스트가 본문과 직접 영향을 받은 요약을 준비하고, DB 서비스가 전체 계획을 검증한 후 원자적으로 반영한다. 실패 시 부분 저장을 노출하지 않는다.
 
@@ -130,7 +145,9 @@ FTS5로 제목·별칭·요약·본문 후보를 찾고 도구명·오류 코드
 | research | run_id, 조사 질문 | 구조화된 근거 또는 실패 상태 |
 | serve | host, port | 그래프 UI 주소 |
 
-JSON envelope는 schema_version, request_id, status, data, warnings, error를 갖는다. stdout은 결과 전용, 진단은 stderr. 종료 코드는 0 성공, 2 입력 오류, 3 충돌, 4 미발견, 5 외부 조사 실패, 6 저장 실패로 구분한다. 성공적으로 경험을 저장한 조사 실패는 run 결과에 복합 상태로 표현한다.
+JSON envelope는 schema_version, request_id, status, data, warnings, error를 갖는다. stdout은 결과 전용, 진단은 stderr. 종료 코드는 0 성공, 2 입력 오류, 3 충돌, 4 미발견, 5 외부 조사 실패, 6 저장 실패로 구분한다. 성공적으로 경험을 저장한 조사 실패는 run 결과에 복합 상태로 표현한다. 저장은 됐지만 입력 일부를 읽지 못한 경우 종료 코드 0과 envelope status `partial`을 반환하며 `ok`로 보고하지 않는다.
+
+구현 과정에서 추가한 명령: `config`(공통 설정 조회·변경), `runs`(실행 단계·실패 기록 조회), `reindex`(검색 색인 재구축), `install-skill`(호스트 스킬 설치).
 
 ## 10. 그래프 피드백 UI
 
@@ -190,7 +207,7 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 
 ## 14. 구현 순서
 
-1. 저장·버전·출처·인제스트 계획·Markdown 렌더러 구현 및 최소 Codex 스킬 연결. 실제 대화에서 저장 → ID로 읽기 → Markdown 반환까지 확인.
+1. 저장·버전·출처·인제스트 계획·Markdown 렌더러 구현 및 최소 호스트 스킬 연결. 실제 대화에서 저장 → ID로 읽기 → Markdown 반환까지 확인. (첫 검증 호스트는 2026-10-26 사용자 결정으로 Codex에서 Claude Code로 바뀌었고, Codex는 3단계에서 같은 계약으로 연결했다.)
 2. 용어·스키마·관계·조인 경로·규칙 및 검색.
 3. 호스트 스킬·Antigravity 프로세스 어댑터.
 4. 그래프 검토·수정·병합·피드백 및 내보내기/가져오기.
@@ -205,3 +222,31 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 - [Slipbox 가이드](https://agentria.ai/docs/slipbox): 페이지·요약·목차·인제스트.
 - [Slipbox 관계](https://agentria.ai/docs/slip-link-node), [조회](https://agentria.ai/docs/slip-follow-links-node): 방향과 유형이 있는 연결.
 - `mvp.md`와 사용자 첨부 화면: 제품 범위 및 테이블·조인·금칙·미지원 연산 요구.
+
+## 16. 구현 대조 (2026-10-26, Phase 2.3 완료 시점)
+
+명세의 요구는 지우지 않고 구현 상태만 표시한다. 미구현 항목은 계획된 Phase에서 구현한다.
+
+| 절 | 요구 | 상태 | 비고 |
+| --- | --- | --- | --- |
+| 1 | 단일 공통 저장소, 설정 파일과 `--store` | 구현 | `config.toml`, 우선순위 옵션 > 환경 변수 > 설정 파일 > 기본값 |
+| 2 | UUID 참조, 외래키, 트랜잭션, `expected_version`, `VERSION_CONFLICT` | 구현 | |
+| 3 | pages·term_senses·aliases·relations·index_members·sources·evidence·page_sources·revisions·runs·schema_objects·join_paths·rules·search_index | 구현 | 단일 `evidence_ref` 대신 `object_evidence` 연결 테이블로 복수 근거 저장 |
+| 3 | feedback 레코드 | 미구현 | Phase 3 |
+| 3 | 관계 해제(soft-delete), 목차 순환 거부 | 부분 | 목차 순환 거부는 구현. 해제는 Phase 3 |
+| 4 | current_conversation·markdown·text·sql_ddl·schema_json·sample_json/csv | 구현 | DDL 방언은 postgresql·oracle. schema_json `samples` 처리 포함 |
+| 5 | 용어 맥락 구분, extracted/inferred 분리, 근거 없는 카디널리티 금지, 부재 확인의 근거 요구 | 구현 | 조인 단계 관계 수·NULL은 PK·FK로 증명될 때만 자동 결정 |
+| 6 | 단계 `received → normalized → planned → committed`, 멱등성, 원자적 저장, 조사 실패 시 경험 보존 | 구현 | 실패 단계·오류 보존, 같은 key 저장 재시도, 조사 재개와 구분 |
+| 7 | FTS5, 식별자 정확 일치 우선, 한국어 부분 문자열, 3자 미만 별칭·제목 경로, 기본값, 필수 규칙 유지, 경로 후보 | 구현 | 3자 미만은 제목·별칭·요약에서 찾음 |
+| 7 | 범위 충돌 시 후보와 차이 제공 | 부분 | 범위 밖 후보와 그 범위는 표시. 항목별 차이 비교는 없음 |
+| 8 | 에이전트 Markdown, 24,000 bytes 예산, `BUDGET_TOO_SMALL`, 생략 목록, 상충·정정 | 구현 | 상충·정정은 CONTRADICTS·SUPERSEDES 관계와 대체 상태 기준 |
+| 9 | init·ingest·query·read·neighbors·paths·update·research | 구현 | |
+| 9 | feedback·merge·export/import·serve | 미구현 | Phase 3·4 |
+| 10 | 그래프 피드백 UI와 API | 미구현 | Phase 3 |
+| 11 | agy 인자 배열 실행, 타임아웃·출력 크기 제한·스키마 검증, 확보 수준 기록, 권한 생략 미사용, 실패 재개 | 구현 | agy 검색 도구가 원문 주소 대신 검색 리디렉션 링크를 줌(표시·경고). 확보 수준은 대부분 검색 결과 요약 |
+| 11 | Codex·Claude Code 스킬이 같은 CLI·저장소 계약 공유 | 구현 | 저장소의 `skills/buildlog/` 원본을 `install-skill`로 설치 |
+| 12 | 내보내기·가져오기·병합·DB 백업 CLI | 미구현 | Phase 3·4. 색인 재구축(`reindex`)만 구현 |
+| 13 | 저장·멱등, 용어, 근거·RCA, 스키마, 경로, 규칙, 없는 기능, 실제 조사 검증 | 구현 | 테스트와 실제 스킬·agy·Codex 실행으로 확인 |
+| 13 | 새 세션 조회 | 부분 | 검색·전달은 검증. 새 세션에서 스킬 자동 호출은 미검증 |
+| 13 | UI 수정 검증 | 미구현 | Phase 3 |
+| 13 | 100/1,000/10,000페이지 성능 측정 | 부분 | 합성 1,000페이지 참고 측정(query p95 46ms)만 수행. 정식 측정은 Phase 4 |

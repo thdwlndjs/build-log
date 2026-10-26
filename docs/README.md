@@ -2,7 +2,19 @@
 
 학습한 내용과 해결한 오류, 데이터 시스템 지식(테이블·용어·조인 경로·규칙)을 기록하고 재사용하는 로컬 지식 저장소입니다. 외부 DB나 API 키는 사용하지 않습니다.
 
-기본 저장소는 `%LOCALAPPDATA%\Buildlog\buildlog.sqlite3`이며 `--store <경로>`로 바꿀 수 있습니다. `--store`는 `-m buildlog` 바로 뒤에 둡니다.
+기본 저장소는 `%LOCALAPPDATA%\Buildlog\buildlog.sqlite3`입니다. `--store <경로>`는 `-m buildlog` 바로 뒤에 둡니다.
+
+## 공통 설정
+
+저장소와 agy 경로는 CLI, Claude Code, Codex가 함께 쓰는 설정입니다. 우선순위는 명령 옵션(`--store`, `--agy`) > 환경 변수(`BUILDLOG_STORE`, `BUILDLOG_AGY`) > 설정 파일 > 기본값입니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m buildlog config show                 # 현재 값과 출처
+.\.venv\Scripts\python.exe -m buildlog config set store "D:\kb\buildlog.sqlite3"
+.\.venv\Scripts\python.exe -m buildlog config unset store
+```
+
+설정 파일은 `%APPDATA%\Buildlog\config.toml`이고, `BUILDLOG_CONFIG`로 위치를 바꿀 수 있습니다. 키는 `store`와 `agy` 두 개입니다. 값에 `%LOCALAPPDATA%` 같은 환경 변수를 쓸 수 있고, 상대 경로는 설정 파일 위치를 기준으로 합니다. 알 수 없는 키나 잘못된 TOML은 입력 오류(종료 코드 2)로 처리합니다.
 
 ## 명령
 
@@ -36,6 +48,9 @@
 # Antigravity 외부 조사: 저장 계획의 research 요청 실행, 또는 기존 페이지에 질문 추가
 .\.venv\Scripts\python.exe -m buildlog research --run <run_id>
 .\.venv\Scripts\python.exe -m buildlog research --page <page_id> --question "질문" --context "맥락"
+
+# 저장 실행 기록: 단계·상태·시도 횟수·보존된 실패
+.\.venv\Scripts\python.exe -m buildlog runs [--status failed]
 
 # Claude Code·Codex 스킬 설치/갱신 (skills/buildlog/ 원본에서)
 .\.venv\Scripts\python.exe -m buildlog install-skill [--host claude-code|codex|all] [--dry-run]
@@ -111,13 +126,30 @@
 - 미지원 연산의 "부재 확인됨"은 직접 근거(observed·reported)가 있어야 합니다. 언급이 없을 뿐이면 "미확인"입니다.
 - 같은 표현이라도 시스템·테이블·컬럼 맥락이 다르면 별도의 용어로 저장합니다.
 - 바뀐 스키마를 다시 넣으면 `SCHEMA_CONFLICT`가 납니다. `replace_existing_schema: true`를 지정해야 버전이 올라가며 갱신되고, 사라진 컬럼은 `deprecated`로 표시됩니다.
-- 계획 중 하나라도 실패하면 아무것도 저장하지 않습니다.
+- 계획 중 하나라도 실패하면 데이터는 아무것도 저장하지 않습니다. 대신 실행 기록에 도달한 단계, 오류 종류, 메시지를 남깁니다(`runs`).
+- schema_json 안의 `samples`(`{"table", "rows"}` 또는 `{"table", "format", "content"}`)는 별도 샘플 출처로 처리합니다. 행은 스키마 출처 원문에 다시 보관하지 않습니다.
+- 저장은 됐지만 입력 일부를 읽지 못한 경우가 있습니다. 샘플 행을 잘라냈거나, 테이블·컬럼을 찾지 못했거나, 읽지 않은 필드나 DDL 구문이 있는 경우입니다. 이때 결과 `status`와 응답 envelope의 `status`가 `partial`이 되고, `partial_sources`에 해당 출처가 나옵니다.
+
+### 저장 단계와 재시도
+
+`received → normalized → planned → committed` 순서로 진행합니다.
+
+| 단계 | 내용 |
+| --- | --- |
+| received | 실행 기록 생성(또는 실패한 같은 키의 재시도 시작) |
+| normalized | 입력 검증 완료 |
+| planned | 현재 저장소에 시험 적용해 참조·충돌을 확인하고 되돌림 |
+| committed | 데이터와 완료 표시를 한 트랜잭션으로 저장 |
+
+- 저장 재시도: 실패한 저장은 같은 `idempotency_key`로 다시 `ingest`하면 같은 실행 기록에서 다시 진행합니다. 입력을 고쳐 다시 보내도 됩니다.
+- 조사 재개: `research`는 이미 committed된 실행의 조사 요청만 이어서 실행합니다.
+- 동시에 같은 키로 저장해도 한 번만 저장되고 나머지는 `reused`로 돌아옵니다.
 
 예제 자료는 [examples/demo_mes/](../examples/demo_mes/)에 있습니다. 실제 시스템이 아닌 데모 자료입니다.
 
 ## 응답과 오류
 
-stdout에는 `{"schema_version", "request_id", "status", "data", "warnings", "error"}` 형태의 결과가 나갑니다. 오류는 같은 형태로 stderr에 나갑니다. `read`의 Markdown 출력만 예외로 그대로 나갑니다.
+stdout에는 `{"schema_version", "request_id", "status", "data", "warnings", "error"}` 형태의 결과가 나갑니다. `status`는 `ok`, `partial`(저장됐지만 입력 일부를 읽지 못함), `error` 중 하나입니다. 오류는 같은 형태로 stderr에 나갑니다. Markdown 출력(`read`, `query` 등)은 envelope 없이 그대로 나갑니다.
 
 | 코드 | 의미 |
 | --- | --- |
