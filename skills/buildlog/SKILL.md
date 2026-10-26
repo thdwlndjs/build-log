@@ -10,7 +10,7 @@ Buildlog is a local Python program with one SQLite store shared by every project
 
 - Python (always this absolute path; never `python` from PATH; works from any directory):
   `{{PYTHON}}`
-- Default store: `%LOCALAPPDATA%\Buildlog\buildlog.sqlite3`. Use another store only when the user names one: add `--store "<path>"` right after `-m buildlog`.
+- Store and agy paths are shared settings for the CLI, Claude Code and Codex. Order: command option > environment variable (`BUILDLOG_STORE`, `BUILDLOG_AGY`) > `%APPDATA%\Buildlog\config.toml` > default. Run `"{{PYTHON}}" -m buildlog config show` to see which store is in use and why. Do not pass `--store` unless the user names a different store; then add `--store "<path>"` right after `-m buildlog`. Change the shared store only when the user asks: `config set store "<path>"`.
 - Plan format reference: [plan-format.md](plan-format.md) — read it before writing any plan that has more than one page.
 - Writing JSON input files: {{WRITE_FILE}}
 
@@ -31,8 +31,8 @@ You do all the work. Never ask the user to write JSON, copy anything, or run a c
 "{{PYTHON}}" -m buildlog ingest --input "<plan.json path>"
 ```
 
-4. If it fails with exit 2, read the message, fix the plan, and run again with the same `idempotency_key`. Do not drop content to make it pass; if a claim cannot be supported, lower its status (e.g. `inferred`, cardinality `unknown`, `unconfirmed`) instead.
-5. Report to the user from the JSON result: what was created / updated / unchanged (counts and the main IDs), each source's `parse_status` and any diagnostics, every warning, whether the run was `reused`, `research_status`, and the store path. Then delete the plan file.
+4. If it fails, nothing was stored; the failed attempt is kept on its run (stage reached, error kind, message — see `runs --status failed`). Read the message, fix the plan, and run `ingest` again with the same `idempotency_key`: that is a save retry of the same run. Do not drop content to make it pass; if a claim cannot be supported, lower its status (e.g. `inferred`, cardinality `unknown`, `unconfirmed`) instead.
+5. Report to the user from the JSON result: what was created / updated / unchanged (counts and the main IDs), the overall `status`, each source's `parse_status` and diagnostics, every warning, whether the run was `reused`, `research_status`, and the store path. If `status` is `partial` (envelope status `partial`), say plainly which sources were only partly read (`partial_sources`) and what was left out; do not call it a complete save. Then delete the plan file.
 
 ## Search
 
@@ -89,6 +89,7 @@ Use this when the user asks to research or back up a record with sources (근거
    - `검색 결과 요약만 확인` (search_snippet) and `모델 기억(원문 미확인)` (from_memory): second-hand. Do not call them verified.
    - If a finding changes the record's conclusion or RCA, update the page with `update` and say so; Buildlog does not rewrite conclusions by itself.
 4. Exit 5 (`RESEARCH_FAILED`): the experience is already saved. Tell the user the failure kind and hint from the output. Run the same command again to resume only the unfinished questions. For `auth`, ask the user to start `agy.exe` and sign in — that is the only step the user has to do.
+   - Resuming research is not a save retry: it only works on a committed run. If the save itself failed, retry `ingest` first (Save step 4).
 
 ## Read
 
@@ -119,7 +120,7 @@ Read the item first to get its current version. Allowed patch fields: page `titl
 
 ## Errors
 
-The CLI prints a JSON envelope `{"status": "error", "error": "..."}` on stderr.
+The CLI prints a JSON envelope `{"status": "error", "error": "..."}` on stderr. A save that succeeded but read only part of its input exits 0 with envelope status `partial` (Save step 5).
 
 | Exit | Meaning | What to do |
 | --- | --- | --- |

@@ -1,3 +1,5 @@
+<!-- installed by `buildlog install-skill` for {{HOST_NAME}}; edit skills/buildlog/ in the Buildlog repository, not this copy -->
+
 # Buildlog save plan (format v2)
 
 One JSON object. Every list is optional, but the plan must save something.
@@ -137,3 +139,16 @@ Update only the fields that changed, including the summary when the body changes
 - Records a question for Antigravity research on the page it should support (`page`: a ref from this plan or a page ID). Nothing is researched during `ingest`; run `buildlog research --run <run_id>` afterwards.
 - One narrow, documentation-answerable question per item (up to 1000 characters). `context` is optional orientation, not evidence. No secrets or private data.
 - The run's `research_status` stays `pending` until the research runs, then becomes `succeeded` or `failed` (resumable).
+
+## Samples inside schema_json
+
+`schema_json` may carry `samples` next to `tables` (optional):
+
+```json
+{"system_key": "inv", "tables": [...], "samples": [
+  {"table": "item", "rows": [{"id": 1, "name": "bolt"}]},
+  {"table": "item", "format": "csv", "content": "id,name\n2,nut\n"}
+]}
+```
+
+Each sample becomes its own sample source (`<ref>#samples[i]`) and follows the same rules as `sample_csv` / `sample_json`: first 50 rows kept, credential-like columns redacted, checked against the table. The rows are not kept again inside the schema source. A truncated sample, an unknown table or column, or an unread field makes that source `partial`, and the save result `status` becomes `partial`.
