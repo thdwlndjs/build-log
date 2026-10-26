@@ -200,8 +200,17 @@ MIGRATIONS: list[list[str]] = [
         "CREATE INDEX join_path_tables_page ON join_path_tables(page_id)",
         "CREATE INDEX object_evidence_evidence ON object_evidence(evidence_id)",
     ],
+    # 3: full-text search. Derived data: `buildlog reindex` rebuilds it from the tables above.
+    # trigram matches substrings, which also covers Korean words with particles attached.
+    [
+        """CREATE VIRTUAL TABLE search_index USING fts5(
+            page_id UNINDEXED, title, aliases, summary, body, extra, tokenize = 'trigram'
+        )""",
+    ],
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
+# Versions whose migration also needs the search index rebuilt from existing rows.
+REINDEX_AFTER = {3}
 
 
 def default_store_path() -> Path:
@@ -262,6 +271,10 @@ def initialize(store: Path) -> dict[str, Any]:
         for version in range(current + 1, SCHEMA_VERSION + 1):
             for statement in MIGRATIONS[version - 1]:
                 connection.execute(statement)
+        if any(current < version <= SCHEMA_VERSION for version in REINDEX_AFTER):
+            from .index import rebuild  # local import: index depends on this module
+
+            rebuild(connection)
         if current != SCHEMA_VERSION:
             connection.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",

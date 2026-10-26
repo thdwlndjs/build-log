@@ -1,0 +1,111 @@
+{
+  "_about": "검색 회귀 세트. 각 사례의 정답 기록·필수 규칙·필수 용어를 사람이 읽을 수 있게 적었다. 말뭉치는 tests/fixtures/experiences.json과 데모 MES·CRM 인제스트(tests/test_knowledge.py의 demo_plan)다.",
+  "cases": [
+    {
+      "name": "오류 코드 정확 일치",
+      "query": "DB 접속하면 ORA-12541 오류가 나",
+      "expect_first": "Oracle XE 접속 실패: 리스너가 떠 있지 않음"
+    },
+    {
+      "name": "다른 표현의 유사 문제 (호스트가 검색어 보강)",
+      "query": "파이썬 패키지 설치하다가 인증서 검증에 실패했어",
+      "terms": [
+        "pip",
+        "SSL",
+        "CERTIFICATE_VERIFY_FAILED",
+        "인증서"
+      ],
+      "expect_in_results": [
+        "pip 설치 SSL 오류를 trusted-host로 우회",
+        "사내 프록시에서 pip 인증서 오류: 루트 인증서 지정으로 해결"
+      ]
+    },
+    {
+      "name": "다른 표현의 유사 문제 (질문 단어만)",
+      "query": "agy 명령을 셸이 못 찾는다",
+      "expect_first": "Antigravity CLI가 PATH에 없어 인식되지 않음"
+    },
+    {
+      "name": "반례가 있는 사례는 상충 기록을 함께 전달",
+      "query": "CERTIFICATE_VERIFY_FAILED 해결 방법",
+      "expect_in_results": [
+        "pip 설치 SSL 오류를 trusted-host로 우회",
+        "사내 프록시에서 pip 인증서 오류: 루트 인증서 지정으로 해결"
+      ],
+      "expect_markdown": [
+        "## 상충·정정 기록",
+        "—CONTRADICTS→",
+        "TLS 검사 프록시가 있는 사내망에서는"
+      ]
+    },
+    {
+      "name": "환경 범위가 다르면 범위 밖 후보로 분리",
+      "query": "CERTIFICATE_VERIFY_FAILED",
+      "scope": "프록시",
+      "expect_first": "사내 프록시에서 pip 인증서 오류: 루트 인증서 지정으로 해결",
+      "expect_out_of_scope": [
+        "pip 설치 SSL 오류를 trusted-host로 우회"
+      ]
+    },
+    {
+      "name": "대체된 기록보다 최신 기록이 앞서고 정정 관계를 표시",
+      "query": "Git Bash 한글 깨짐",
+      "expect_first": "Git Bash 한글 깨짐: PYTHONIOENCODING=utf-8",
+      "expect_markdown": [
+        "—SUPERSEDES→",
+        "상태: superseded"
+      ]
+    },
+    {
+      "name": "동명 용어: 범위에 맞는 정의를 구분",
+      "query": "고객 사업자번호 형식",
+      "scope": "demo_crm",
+      "expect_first": "customer.biz_no",
+      "expect_terms_in_scope": [
+        "demo_crm:crm.customer.biz_no"
+      ],
+      "expect_terms_other_scope": [
+        "demo_mes:site.biz_no",
+        "demo_mes:equipment.vendor_biz_no"
+      ],
+      "expect_in_results": [
+        "crm.customer (demo_crm)"
+      ]
+    },
+    {
+      "name": "시계열 조회에 필수 기간 조건과 금칙을 함께 전달",
+      "query": "사업장별 센서 측정값 평균을 뽑고 싶다",
+      "scope": "demo_mes",
+      "terms": [
+        "sensor_reading"
+      ],
+      "limit": 1,
+      "expect_first": "sensor_reading (demo_mes)",
+      "expect_rules": [
+        "reading_time 기간 조건을 반드시 건다",
+        "reading_time 기간 조건 없이 전체 조회하지 않는다"
+      ]
+    },
+    {
+      "name": "용량 집계에는 중복 합산 주의점과 변경 이력 부재를 전달",
+      "query": "사업장별 설비 용량 합계",
+      "scope": "demo_mes",
+      "terms": [
+        "capacity_kw",
+        "equipment"
+      ],
+      "expect_rules": [
+        "설비 마스터 변경 이력"
+      ],
+      "expect_markdown": [
+        "측정 건수만큼 중복 합산",
+        "미지원 연산 (부재 확인됨)"
+      ]
+    },
+    {
+      "name": "관련 기록이 없으면 없다고 반환",
+      "query": "쿠버네티스 파드가 계속 재시작된다",
+      "expect_no_results": true
+    }
+  ]
+}

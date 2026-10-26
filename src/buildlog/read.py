@@ -261,7 +261,7 @@ def _render_relations(relations: dict[str, list[dict[str, Any]]]) -> list[str]:
     return lines
 
 
-def _render_page(record: dict[str, Any]) -> list[str]:
+def _render_page(record: dict[str, Any], include_rules: bool = True) -> list[str]:
     page = record["page"]
     lines = [
         f"# {page['title']}", "",
@@ -275,7 +275,7 @@ def _render_page(record: dict[str, Any]) -> list[str]:
     sections: list[list[str]] = []
     if record.get("schema_object"):
         sections.append(_render_schema(record["schema_object"]))
-    if record.get("rules"):
+    if include_rules and record.get("rules"):
         sections.append(_render_rules(record["rules"]))
     if record.get("terms"):
         sections.append(_render_terms(record["terms"]))

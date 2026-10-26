@@ -1,0 +1,56 @@
+{
+  "idempotency_key": "test:experience-corpus",
+  "sources": [
+    {"ref": "chat", "kind": "conversation", "locator": "테스트용 가상 대화 묶음 (실제 기록 아님)", "accessible_excerpt": "검색 회귀 테스트용 가상 경험"}
+  ],
+  "evidence": [
+    {"ref": "e-ora", "source": "chat", "evidence_kind": "observed", "excerpt": "ORA-12541: TNS:no listener"},
+    {"ref": "e-lsnr", "source": "chat", "evidence_kind": "observed", "excerpt": "lsnrctl start 후 접속 성공"},
+    {"ref": "e-ssl", "source": "chat", "evidence_kind": "observed", "excerpt": "SSL: CERTIFICATE_VERIFY_FAILED certificate verify failed: unable to get local issuer certificate"},
+    {"ref": "e-trusted", "source": "chat", "evidence_kind": "observed", "excerpt": "--trusted-host pypi.org --trusted-host files.pythonhosted.org 추가 후 설치 성공 (집 네트워크)"},
+    {"ref": "e-proxy", "source": "chat", "evidence_kind": "observed", "excerpt": "사내 프록시에서는 --trusted-host를 붙여도 CERTIFICATE_VERIFY_FAILED가 계속 남"},
+    {"ref": "e-cert", "source": "chat", "evidence_kind": "observed", "excerpt": "PIP_CERT에 사내 루트 인증서 경로를 지정하자 설치 성공"},
+    {"ref": "e-agy", "source": "chat", "evidence_kind": "observed", "excerpt": "which: no agy in (...)"},
+    {"ref": "e-docker", "source": "chat", "evidence_kind": "observed", "excerpt": "docker: command not found (WSL Ubuntu)"},
+    {"ref": "e-chcp", "source": "chat", "evidence_kind": "observed", "excerpt": "chcp 65001 이후 일부 출력은 정상, Python 출력은 여전히 깨짐"},
+    {"ref": "e-pyenc", "source": "chat", "evidence_kind": "observed", "excerpt": "PYTHONIOENCODING=utf-8 설정 후 Git Bash에서 한글 정상 출력"}
+  ],
+  "pages": [
+    {"ref": "ora", "type": "experience", "title": "Oracle XE 접속 실패: 리스너가 떠 있지 않음",
+     "summary_md": "Oracle XE 접속이 ORA-12541로 실패했다. 리스너 서비스를 시작하자 해결됐다.",
+     "body_md": "## 문제\n\nSQL Developer에서 로컬 Oracle XE 접속 시 `ORA-12541: TNS:no listener`.\n\n## 환경\n\nWindows 11, Oracle Database 21c XE\n\n## Mitigation\n\n`lsnrctl start` 또는 서비스 `OracleOraDB21Home1TNSListener` 시작.\n\n## RCA 상태\n\n리스너 서비스 시작 유형이 수동이었다. 재부팅 후 재발 여부는 미확인.\n\n## 재사용 조건\n\n로컬 XE에서 TNS 리스너 오류가 날 때.",
+     "evidence": ["e-ora", "e-lsnr"]},
+    {"ref": "pip-trusted", "type": "experience", "title": "pip 설치 SSL 오류를 trusted-host로 우회",
+     "summary_md": "pip install이 CERTIFICATE_VERIFY_FAILED로 실패했고 --trusted-host 옵션으로 설치했다.",
+     "body_md": "## 문제\n\n`pip install requests`가 `SSL: CERTIFICATE_VERIFY_FAILED`로 실패.\n\n## 환경\n\n집 네트워크, Windows 11, Python 3.12\n\n## Mitigation\n\n`--trusted-host pypi.org --trusted-host files.pythonhosted.org` 추가.\n\n## RCA 상태\n\nRCA 미확정. 인증서 검증을 끄는 우회일 뿐 원인은 확인하지 않았다.\n\n## 재사용 조건\n\n프록시가 없는 네트워크에서 일시적으로만 쓴다.",
+     "evidence": ["e-ssl", "e-trusted"]},
+    {"ref": "pip-proxy", "type": "experience", "title": "사내 프록시에서 pip 인증서 오류: 루트 인증서 지정으로 해결",
+     "summary_md": "사내 프록시 환경에서는 --trusted-host로도 CERTIFICATE_VERIFY_FAILED가 남았고, PIP_CERT에 사내 루트 인증서를 지정해 해결했다.",
+     "body_md": "## 문제\n\n사내 프록시 뒤에서 `pip install`이 `CERTIFICATE_VERIFY_FAILED`.\n\n## 환경\n\n회사 네트워크(TLS 검사 프록시), Windows 11\n\n## 증거와 시도\n\n`--trusted-host`를 붙여도 동일 오류.\n\n## Mitigation\n\n`PIP_CERT`(또는 `pip config set global.cert`)에 사내 루트 인증서 경로 지정.\n\n## RCA 상태\n\n프록시가 TLS를 다시 서명해 로컬 신뢰 저장소에 없는 발급자가 됐다. 확정.\n\n## 재사용 조건\n\nTLS 검사 프록시가 있는 사내망.",
+     "evidence": ["e-proxy", "e-cert"]},
+    {"ref": "agy", "type": "experience", "title": "Antigravity CLI가 PATH에 없어 인식되지 않음",
+     "summary_md": "agy가 설치돼 있지만 PATH에 없었다. 절대 경로로 실행한다.",
+     "body_md": "## 문제\n\n셸에서 agy 명령을 찾지 못함.\n\n## Mitigation\n\n`%LOCALAPPDATA%\\agy\\bin\\agy.exe` 절대 경로 사용.\n\n## RCA 상태\n\nRCA 미확정.",
+     "evidence": ["e-agy"]},
+    {"ref": "docker", "type": "experience", "title": "WSL에서 docker 명령이 없다고 나옴",
+     "summary_md": "Docker Desktop의 WSL integration을 켜자 해결됐다.",
+     "body_md": "## 문제\n\nWSL Ubuntu에서 `docker: command not found`.\n\n## Mitigation\n\nDocker Desktop → Settings → Resources → WSL integration에서 배포판 활성화.",
+     "evidence": ["e-docker"]},
+    {"ref": "chcp", "type": "experience", "title": "Git Bash 한글 깨짐: chcp 65001", "status": "superseded",
+     "summary_md": "chcp 65001로 코드페이지를 바꿨지만 Python 출력은 여전히 깨졌다.",
+     "body_md": "## 문제\n\nGit Bash에서 한글 출력이 깨짐.\n\n## Mitigation\n\n`chcp 65001`.\n\n## RCA 상태\n\n부분 해결. Python 출력은 그대로 깨짐.",
+     "evidence": ["e-chcp"]},
+    {"ref": "pyenc", "type": "experience", "title": "Git Bash 한글 깨짐: PYTHONIOENCODING=utf-8",
+     "summary_md": "PYTHONIOENCODING=utf-8을 설정하자 Python의 한글 출력이 정상으로 나왔다.",
+     "body_md": "## 문제\n\nGit Bash에서 Python 한글 출력이 깨짐.\n\n## Mitigation\n\n`PYTHONIOENCODING=utf-8` 환경 변수.\n\n## RCA 상태\n\nPython 표준 출력이 콘솔 코드페이지(cp949)로 인코딩되던 것이 원인.",
+     "evidence": ["e-pyenc"]}
+  ],
+  "relations": [
+    {"source": "pip-proxy", "target": "pip-trusted", "type": "CONTRADICTS",
+     "explanation_md": "TLS 검사 프록시가 있는 사내망에서는 --trusted-host 우회가 통하지 않는다. 사내망에서는 루트 인증서를 지정한다.",
+     "evidence": ["e-proxy"], "status": "extracted"},
+    {"source": "pyenc", "target": "chcp", "type": "SUPERSEDES",
+     "explanation_md": "chcp 65001은 Python 출력에 효과가 없었다. PYTHONIOENCODING 방법이 대체한다.",
+     "evidence": ["e-chcp", "e-pyenc"], "status": "extracted"}
+  ]
+}

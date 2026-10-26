@@ -10,6 +10,7 @@ from typing import Any
 
 from . import db
 from .db import ConflictError, NotFoundError, ValidationError, normalize_text, to_json
+from .index import reindex
 from .plan import normalize_plan
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -76,6 +77,7 @@ class _Apply:
         self.updated: list[dict[str, Any]] = []
         self.reused: list[dict[str, Any]] = []
         self.warnings: list[str] = list(plan["warnings"])
+        self.touched: set[str] = set()  # pages whose search index rows must be refreshed
 
     # ------------------------------------------------------------ helpers
 
@@ -115,6 +117,7 @@ class _Apply:
                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
             (page_id, page_type, title, summary, body, status, self.ts, self.ts),
         )
+        self.touched.add(page_id)
         snapshot = {"id": page_id, "type": page_type, "title": title, "summary_md": summary, "body_md": body,
                     "status": status, "version": 1, "updated_at": self.ts}
         self._revision("page", page_id, 1, snapshot, "created")
@@ -134,6 +137,7 @@ class _Apply:
         )
         snapshot = {k: values[k] for k in ("id", "type", "title", "summary_md", "body_md", "status")} | {"version": version, "updated_at": self.ts}
         self._revision("page", page_id, version, snapshot, reason)
+        self.touched.add(page_id)
         self.updated.append({"type": "page", "id": page_id, "version": version, "title": values["title"]})
         return version
 
@@ -239,6 +243,7 @@ class _Apply:
             self._join_path(path, f"join_paths[{i}]")
         for i, rule in enumerate(self.plan["rules"]):
             self._rule(rule, f"rules[{i}]")
+        reindex(self.c, self.touched)
         return self._finish()
 
     def _finish(self) -> dict[str, Any]:
@@ -538,6 +543,9 @@ class _Apply:
                 (alias, normalize_text(alias), term_id),
             )
         self._link_evidence("term", term_id, evidence_ids)
+        self.touched.add(page_id or "")
+        if existing is not None and existing["page_id"]:
+            self.touched.add(existing["page_id"])
 
     def _upsert_relation(self, source_id: str, target_id: str, rel_type: str, explanation: str, status: str,
                          evidence_ids: list[str], where: str, record: bool = True) -> str:
@@ -691,6 +699,7 @@ class _Apply:
             (path_id, system_key, path["title"], normalized_title, path["purpose"], values["steps_json"],
              path["conditions_md"], path["caveats_md"], path["status"], self.ts, self.ts),
         )
+        self.touched.update(table_pages)
         for page in table_pages:
             self.c.execute("INSERT INTO join_path_tables(join_path_id, page_id) VALUES (?, ?)", (path_id, page))
         self._revision("join_path", path_id, 1, {"id": path_id, **values, "version": 1}, "created")
@@ -724,4 +733,5 @@ class _Apply:
         )
         self._revision("rule", rule_id, 1, {"id": rule_id, "scope_page_id": scope_id, **values, "version": 1}, "created")
         self._link_evidence("rule", rule_id, evidence_ids)
+        self.touched.add(scope_id)
         self._record("rules", {"id": rule_id, "kind": rule["kind"], "scope": scope_id})

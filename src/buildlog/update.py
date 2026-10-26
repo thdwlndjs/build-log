@@ -8,6 +8,7 @@ from typing import Any
 
 from . import db
 from .db import KNOWLEDGE_STATUSES, PAGE_STATUSES, ConflictError, NotFoundError, ValidationError
+from .index import reindex
 from .plan import reject_secrets, require_text
 
 EDITABLE: dict[str, tuple[str, set[str]]] = {
@@ -79,6 +80,17 @@ def update_object(store: Path, object_id: str, expected_version: int, patch: dic
         if "steps_json" in snapshot:
             snapshot["steps"] = json.loads(snapshot.pop("steps_json"))
         db.add_revision(c, object_type, object_id, version, snapshot, reason, timestamp, str(uuid.uuid4()))
+        if object_type == "page":
+            affected = [object_id]
+        elif object_type == "term":
+            affected = [values["page_id"]]
+        elif object_type == "rule":
+            affected = [values["scope_page_id"]]
+        elif object_type == "join_path":
+            affected = [r["page_id"] for r in c.execute("SELECT page_id FROM join_path_tables WHERE join_path_id = ?", (object_id,))]
+        else:
+            affected = []
+        reindex(c, affected)
     return {"object_type": object_type, "id": object_id, "version": version, "store": str(store),
             **({"page_id": object_id} if object_type == "page" else {})}
 

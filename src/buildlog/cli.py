@@ -12,6 +12,12 @@ from .store import (
     BuildlogError, ConflictError, NotFoundError, ValidationError, default_store_path, ingest, initialize,
     read_object, render_markdown, update_object,
 )
+from . import db
+from .index import rebuild
+from .search import (
+    DEFAULT_CANDIDATES, DEFAULT_LIMIT, DEFAULT_MAX_BYTES, DEFAULT_MAX_RELATED, BudgetTooSmall, neighbors, paths, query,
+    render_neighbors, render_paths,
+)
 
 ENVELOPE_VERSION = 1
 # Exit codes (spec §9): 0 ok, 2 invalid input, 3 conflict, 4 not found, 5 external research failure, 6 store failure.
@@ -55,6 +61,28 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument("--expected-version", required=True, type=int)
     update_parser.add_argument("--patch", required=True, help="UTF-8 JSON file, or - for stdin")
     update_parser.add_argument("--reason", required=True)
+    query_parser = commands.add_parser("query", help="find stored knowledge for a question and return agent-ready Markdown")
+    query_parser.add_argument("text", nargs="?", help="the question; or pass --input")
+    query_parser.add_argument("--input", help='UTF-8 JSON file or - : {"query", "terms", "scope", "limit", "max_bytes"}')
+    query_parser.add_argument("--term", action="append", default=[], help="extra search term (repeatable): error codes, synonyms, table names")
+    query_parser.add_argument("--scope", help="system key (e.g. demo_mes) or environment word (e.g. Windows)")
+    query_parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    query_parser.add_argument("--candidates", type=int, default=DEFAULT_CANDIDATES)
+    query_parser.add_argument("--max-related", type=int, default=DEFAULT_MAX_RELATED)
+    query_parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+    query_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    neighbors_parser = commands.add_parser("neighbors")
+    neighbors_parser.add_argument("page_id")
+    neighbors_parser.add_argument("--type")
+    neighbors_parser.add_argument("--direction", choices=("out", "in", "both"), default="both")
+    neighbors_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    paths_parser = commands.add_parser("paths")
+    paths_parser.add_argument("--system", required=True)
+    paths_parser.add_argument("--from", dest="from_table", required=True)
+    paths_parser.add_argument("--to", dest="to_table", required=True)
+    paths_parser.add_argument("--purpose")
+    paths_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    commands.add_parser("reindex", help="rebuild the search index from stored records")
     return parser
 
 
@@ -74,6 +102,34 @@ def main(argv: list[str] | None = None) -> int:
                 _write(sys.stdout, render_markdown(record))
                 return 0
             data, warnings = record, []
+        elif args.command == "query":
+            spec: dict[str, Any] = _load_json(args.input) if args.input else {}
+            if not isinstance(spec, dict):
+                raise ValidationError("query input must be a JSON object")
+            text = spec.get("query", args.text) or ""
+            data = query(store, text, terms=list(spec.get("terms", [])) + args.term, scope=spec.get("scope", args.scope),
+                         limit=spec.get("limit", args.limit), candidates=spec.get("candidates", args.candidates),
+                         max_related=spec.get("max_related", args.max_related), max_bytes=spec.get("max_bytes", args.max_bytes))
+            if args.format == "markdown":
+                _write(sys.stdout, data["markdown"])
+                return 0
+            warnings = []
+        elif args.command == "neighbors":
+            data, warnings = neighbors(store, args.page_id, args.type, args.direction), []
+            if args.format == "markdown":
+                _write(sys.stdout, render_neighbors(data))
+                return 0
+        elif args.command == "paths":
+            data, warnings = paths(store, args.system, args.from_table, args.to_table, args.purpose), []
+            if args.format == "markdown":
+                _write(sys.stdout, render_paths(data))
+                return 0
+        elif args.command == "reindex":
+            if not store.exists():
+                raise NotFoundError(f"store does not exist: {store}")
+            initialize(store)
+            with db.write(store) as connection:
+                data, warnings = {"store": str(store), "pages_indexed": rebuild(connection)}, []
         else:
             patch = _load_json(args.patch)
             if not isinstance(patch, dict):
@@ -81,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
             data, warnings = update_object(store, args.object_id, args.expected_version, patch, args.reason), []
         _write(sys.stdout, _envelope(request_id, "ok", data, warnings))
         return 0
+    except BudgetTooSmall as error:
+        _write(sys.stderr, _envelope(request_id, "error", error.data, error=str(error)))
+        return EXIT_INPUT
     except ConflictError as error:
         return _fail(request_id, error, EXIT_CONFLICT)
     except NotFoundError as error:
