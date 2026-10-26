@@ -94,6 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
     research_parser.add_argument("--agy", help="path to agy.exe (default: BUILDLOG_AGY or %%LOCALAPPDATA%%\\agy\\bin\\agy.exe)")
     research_parser.add_argument("--retry-succeeded", action="store_true", help="also re-run requests that already succeeded")
     research_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    skill_parser = commands.add_parser("install-skill", help="install the Buildlog skill for Claude Code and/or Codex")
+    skill_parser.add_argument("--host", choices=("claude-code", "codex", "all"), default="all")
+    skill_parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -148,6 +151,11 @@ def main(argv: list[str] | None = None) -> int:
                 _write(sys.stdout, render_research(data))
                 return 0
             warnings = []
+        elif args.command == "install-skill":
+            from .skills import HOSTS, install
+
+            hosts = sorted(HOSTS) if args.host == "all" else [args.host]
+            data, warnings = install(hosts, dry_run=args.dry_run), []
         elif args.command == "reindex":
             if not store.exists():
                 raise NotFoundError(f"store does not exist: {store}")
