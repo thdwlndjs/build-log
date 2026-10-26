@@ -14,6 +14,7 @@ from .store import (
 )
 from . import db
 from .index import rebuild
+from .research import DEFAULT_TIMEOUT, ResearchFailed, add_request, render_research, run_research
 from .search import (
     DEFAULT_CANDIDATES, DEFAULT_LIMIT, DEFAULT_MAX_BYTES, DEFAULT_MAX_RELATED, BudgetTooSmall, neighbors, paths, query,
     render_neighbors, render_paths,
@@ -21,7 +22,7 @@ from .search import (
 
 ENVELOPE_VERSION = 1
 # Exit codes (spec §9): 0 ok, 2 invalid input, 3 conflict, 4 not found, 5 external research failure, 6 store failure.
-EXIT_INPUT, EXIT_CONFLICT, EXIT_NOT_FOUND, EXIT_STORE = 2, 3, 4, 6
+EXIT_INPUT, EXIT_CONFLICT, EXIT_NOT_FOUND, EXIT_RESEARCH, EXIT_STORE = 2, 3, 4, 5, 6
 
 
 def _store(value: str | None) -> Path:
@@ -83,6 +84,16 @@ def build_parser() -> argparse.ArgumentParser:
     paths_parser.add_argument("--purpose")
     paths_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     commands.add_parser("reindex", help="rebuild the search index from stored records")
+    research_parser = commands.add_parser("research", help="run pending external research with Antigravity (agy)")
+    research_parser.add_argument("--run", dest="run_id", help="run the unfinished research requests of this ingest run")
+    research_parser.add_argument("--page", dest="page_id", help="run the unfinished requests of this page, or attach --question to it")
+    research_parser.add_argument("--request", dest="request_ids", action="append", default=[], help="request id (repeatable)")
+    research_parser.add_argument("--question", help="new question to attach to --page and run now")
+    research_parser.add_argument("--context", default="", help="short context for --question")
+    research_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds agy may spend per question")
+    research_parser.add_argument("--agy", help="path to agy.exe (default: BUILDLOG_AGY or %%LOCALAPPDATA%%\\agy\\bin\\agy.exe)")
+    research_parser.add_argument("--retry-succeeded", action="store_true", help="also re-run requests that already succeeded")
+    research_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     return parser
 
 
@@ -124,6 +135,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.format == "markdown":
                 _write(sys.stdout, render_paths(data))
                 return 0
+        elif args.command == "research":
+            request_ids = list(args.request_ids)
+            if args.question:
+                if not args.page_id:
+                    raise ValidationError("--question needs --page")
+                request_ids.append(add_request(store, args.page_id, args.question, args.context)["id"])
+            data = run_research(store, run_id=args.run_id, page_id=None if args.question else args.page_id,
+                                request_ids=request_ids or None, agy=[args.agy] if args.agy else None,
+                                timeout=args.timeout, retry_succeeded=args.retry_succeeded)
+            if args.format == "markdown":
+                _write(sys.stdout, render_research(data))
+                return 0
+            warnings = []
         elif args.command == "reindex":
             if not store.exists():
                 raise NotFoundError(f"store does not exist: {store}")
@@ -137,6 +161,12 @@ def main(argv: list[str] | None = None) -> int:
             data, warnings = update_object(store, args.object_id, args.expected_version, patch, args.reason), []
         _write(sys.stdout, _envelope(request_id, "ok", data, warnings))
         return 0
+    except ResearchFailed as error:
+        # Exit 5: external research failed. The saved experience is untouched; the summary says what to resume.
+        if getattr(args, "format", "json") == "markdown":
+            _write(sys.stdout, render_research(error.data))
+        _write(sys.stderr, _envelope(request_id, "error", error.data, error=str(error)))
+        return EXIT_RESEARCH
     except BudgetTooSmall as error:
         _write(sys.stderr, _envelope(request_id, "error", error.data, error=str(error)))
         return EXIT_INPUT

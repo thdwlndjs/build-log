@@ -243,8 +243,24 @@ class _Apply:
             self._join_path(path, f"join_paths[{i}]")
         for i, rule in enumerate(self.plan["rules"]):
             self._rule(rule, f"rules[{i}]")
+        research = [self._research_request(item, f"research[{i}]") for i, item in enumerate(self.plan["research"])]
+        if research:
+            self.c.execute("UPDATE runs SET research_status = 'pending' WHERE id = ?", (self.run_id,))
+            self.created["research_requests"] = research
         reindex(self.c, self.touched)
         return self._finish()
+
+    def _research_request(self, item: dict[str, Any], where: str) -> dict[str, Any]:
+        # Only recorded here. The research itself runs later (`buildlog research`), outside this
+        # transaction, so a slow or failing external call can never undo the saved experience.
+        page_id = self.page_id(item["page"], where)
+        request_id = new_id()
+        self.c.execute(
+            """INSERT INTO research_requests(id, run_id, page_id, question, context, status, attempts, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)""",
+            (request_id, self.run_id, page_id, item["question"], item["context"], self.ts, self.ts),
+        )
+        return {"id": request_id, "page_id": page_id, "question": item["question"], "status": "pending"}
 
     def _finish(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -260,8 +276,9 @@ class _Apply:
                 for s in self.plan["sources"]
             ],
             "warnings": self.warnings,
+            "research_status": "pending" if self.plan["research"] else "not_requested",
         }
-        host_pages = [p for p in self.created.get("pages", []) if p.get("ref") is not None]
+        host_pages =[p for p in self.created.get("pages", []) if p.get("ref") is not None]
         if len(host_pages) == 1:
             result["page_id"] = host_pages[0]["id"]
             result["version"] = 1

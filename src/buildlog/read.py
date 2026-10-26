@@ -91,6 +91,8 @@ def _page_record(c: sqlite3.Connection, page: dict[str, Any]) -> dict[str, Any]:
         "relations": {"outgoing": _with_evidence(c, "relation", outgoing), "incoming": _with_evidence(c, "relation", incoming)},
         "index": {"children": children, "parents": parents},
         "evidence": _page_evidence(c, page_id),
+        "research": _rows(c, """SELECT id, question, status, attempts, error_kind, last_error, updated_at FROM research_requests
+                                WHERE page_id = ? ORDER BY created_at, rowid""", (page_id,)),
     }
 
 
@@ -287,6 +289,18 @@ def _render_page(record: dict[str, Any], include_rules: bool = True) -> list[str
     index = record.get("index") or {"children": [], "parents": []}
     if index["children"]:
         sections.append(["## 목차", ""] + [f"{c['position']}. {c['title']} (`{c['id']}`)" for c in index["children"]])
+    research = record.get("research") or []
+    if research:
+        labels = {"pending": "대기", "running": "진행 중 또는 중단됨", "succeeded": "완료", "failed": "실패"}
+        block = ["## 외부 조사", ""]
+        for r in research:
+            line = f"- {r['question']} · {labels.get(r['status'], r['status'])} · 시도 {r['attempts']}회 · `{r['id']}`"
+            if r["status"] == "failed":
+                line += f" · 원인({r['error_kind']}): {_excerpt(r['last_error'] or '', 200)}"
+            block.append(line)
+        if any(r["status"] != "succeeded" for r in research):
+            block += ["", "끝나지 않은 조사가 있다. 이 기록의 근거는 아직 보강 전이며 `buildlog research --page <id>`로 재개한다."]
+        sections.append(block)
     if index["parents"]:
         sections.append(["## 상위 목차", ""] + [f"- {p['title']} (`{p['id']}`)" for p in index["parents"]])
     if record["evidence"]:

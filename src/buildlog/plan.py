@@ -24,7 +24,7 @@ EVIDENCE_KINDS = {"observed", "reported", "inferred"}
 JOIN_KINDS = {"inner", "left", "right", "full", "unknown"}
 CARDINALITIES = {"1:1", "1:N", "N:1", "N:M", "unknown"}
 MAX_CONTENT_BYTES = 5 * 1024 * 1024
-V2_KEYS = {"idempotency_key", "sources", "evidence", "pages", "terms", "relations", "join_paths", "rules", "index_members"}
+V2_KEYS = {"idempotency_key", "sources", "evidence", "pages", "terms", "relations", "join_paths", "rules", "index_members", "research"}
 
 _TOKEN_VALUE_RE = re.compile(r"\b(?:ghp|gho|github_pat|sk|xox[bp])[-_][A-Za-z0-9_-]{16,}\b|\bAKIA[0-9A-Z]{16}\b")
 _ASSIGNED_SECRET_RE = re.compile(r"(?i)\b((?:password|passwd|pwd|secret|api[_-]?key|token)\s*[:=]\s*)(['\"]?)[^\s'\";,]+\2")
@@ -144,7 +144,7 @@ def _from_legacy(legacy: dict[str, Any]) -> dict[str, Any]:
 
 def _empty_plan(key: str) -> dict[str, Any]:
     return {"idempotency_key": key, "sources": [], "evidence": [], "pages": [], "terms": [], "relations": [],
-            "join_paths": [], "rules": [], "index_members": [], "warnings": []}
+            "join_paths": [], "rules": [], "index_members": [], "research": [], "warnings": []}
 
 
 # ---------------------------------------------------------------- v2 sources and evidence
@@ -485,6 +485,21 @@ def _index_member(raw: Any, index: int) -> dict[str, Any]:
             "child": require_text(raw.get("child"), f"{where}.child"), "position": position}
 
 
+MAX_RESEARCH_QUESTION = 1000
+
+
+def _research(raw: Any, index: int) -> dict[str, Any]:
+    """A question for external research, attached to the page it should support."""
+    where = f"research[{index}]"
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{where} must be an object")
+    question = require_text(raw.get("question"), f"{where}.question").strip()
+    if len(question) > MAX_RESEARCH_QUESTION:
+        raise ValidationError(f"{where}.question is longer than {MAX_RESEARCH_QUESTION} characters; ask one narrow question")
+    return {"question": question, "page": require_text(raw.get("page"), f"{where}.page"),
+            "context": _optional_text(raw.get("context"), f"{where}.context")}
+
+
 def _list(raw: dict[str, Any], key: str) -> list[Any]:
     value = raw.get(key, [])
     if not isinstance(value, list):
@@ -533,6 +548,7 @@ def normalize_plan(raw: Any) -> tuple[dict[str, Any], str]:
     plan["join_paths"] = [_join_path(item, i) for i, item in enumerate(_list(raw, "join_paths"))]
     plan["rules"] = [_rule(item, i, evidence_kinds) for i, item in enumerate(_list(raw, "rules"))]
     plan["index_members"] = [_index_member(item, i) for i, item in enumerate(_list(raw, "index_members"))]
+    plan["research"] = [_research(item, i) for i, item in enumerate(_list(raw, "research"))]
     for kind in ("pages", "terms", "join_paths", "rules"):
         _unique_refs(plan[kind], kind)
 
@@ -546,5 +562,7 @@ def normalize_plan(raw: Any) -> tuple[dict[str, Any], str]:
             or any(s["schema"] for s in plan["sources"]) or any(s["rows"] is not None for s in plan["sources"])):
         raise ValidationError("plan saves nothing: add pages, terms, relations, join_paths, rules, or a schema source")
 
-    hash_basis = {k: v for k, v in plan.items() if k != "warnings"}
+    # "research" joined the plan after v2 plans were stored; leaving it out when empty keeps
+    # those plans' input hashes, and so their idempotency, unchanged.
+    hash_basis = {k: v for k, v in plan.items() if k != "warnings" and not (k == "research" and not v)}
     return plan, sha256(hash_basis)

@@ -207,7 +207,29 @@ MIGRATIONS: list[list[str]] = [
             page_id UNINDEXED, title, aliases, summary, body, extra, tokenize = 'trigram'
         )""",
     ],
+    # 4: external research requests (Antigravity). A failed or interrupted request stays
+    # resumable; the experience it belongs to is already committed and never lost.
+    [
+        """CREATE TABLE research_requests (
+            id TEXT PRIMARY KEY,
+            run_id TEXT REFERENCES runs(id),
+            page_id TEXT NOT NULL REFERENCES pages(id),
+            question TEXT NOT NULL,
+            context TEXT NOT NULL,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL,
+            error_kind TEXT,
+            last_error TEXT,
+            conversation_id TEXT,
+            result_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX research_requests_run ON research_requests(run_id)",
+        "CREATE INDEX research_requests_page ON research_requests(page_id)",
+    ],
 ]
+RESEARCH_STATUSES = {"pending", "running", "succeeded", "failed"}
 SCHEMA_VERSION = len(MIGRATIONS)
 # Versions whose migration also needs the search index rebuilt from existing rows.
 REINDEX_AFTER = {3}
