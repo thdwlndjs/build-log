@@ -149,7 +149,7 @@ PRD R01–R13의 검증 결과와 실제 실행 근거를 남긴다. 사용자 �
 
 ## 8. 진행 기록
 
-현재 상태: Phase 1 완료(2026-10-26). 다음은 Phase 2.1.
+현재 상태: Phase 2.1 완료(2026-10-26). 다음은 Phase 2.2.
 
 ### Phase 1 — 2026-10-26 완료
 
@@ -158,5 +158,21 @@ PRD R01–R13의 검증 결과와 실제 실행 근거를 남긴다. 사용자 �
 - 검증 명령: `.venv\Scripts\python.exe -m unittest discover -s tests` → 15개 통과. 중복 방지, 같은 key에 다른 입력이면 충돌, 이전 버전 기준 수정 거부, 저장 도중 실패 시 전체 rollback, 잘못된 입력이 기존 DB에 영향 없음, migration 재실행과 상위 버전 거부, 별도 프로세스 CLI 저장→읽기를 포함한다.
 - 실제 대화 검증: Claude Code 대화에서 경험 한 건을 정리해 저장(`page_id aae4c7c0-fe5e-45bc-a2c4-675adca81e07`) → 같은 입력 재저장 시 `reused: true` → `buildlog` 스킬 호출로 ID 읽기 → Markdown 반환. 저장소는 `%LOCALAPPDATA%\Buildlog\buildlog.sqlite3`이고 이전 점검 기록(`66fe32dc-…`)도 보존됐다.
 - 남은 장애: 새로 설치한 스킬은 다음 세션부터 목록에 나타난다. 첫 저장은 스킬 파일의 절차대로 실행했고, 읽기는 스킬 호출로 수행했다. agy는 `%LOCALAPPDATA%\agy\bin\agy.exe`에 있지만 PATH에 없고 로그인 전이다. Phase 2.3 전에 사용자 로그인이 필요하다.
+
+### Phase 2.1 — 2026-10-26 완료
+
+- 구현: 저장 계획 v2(`src/buildlog/plan.py`). 출처는 대화·Markdown·텍스트·SQL DDL·schema_json·CSV/JSON 샘플이다. 근거로 인용한 문장이 원문에 있는지 확인하고 줄 번호를 기록한다. DDL 파서(`ddl.py`, PostgreSQL·Oracle)는 해석하지 못한 구문을 진단으로 남기고 `partial`로 보고한다. 저장(`ingest.py`)은 테이블·컬럼 페이지, FK의 `extracted` JOINS_TO, 맥락별 용어와 별칭, 관계, 목차(순환 거부), 조인 경로, 규칙을 하나의 트랜잭션으로 반영한다. 조인 단계의 관계 수·NULL 여부는 PK·FK로 증명될 때만 채우고, 근거 없는 단정과 스키마와 모순되는 값은 거부한다. 미지원 연산의 "부재 확인됨"에는 직접 근거가 필요하다. 바뀐 스키마는 `replace_existing_schema`일 때만 버전을 올려 갱신한다. 렌더러(`read.py`)는 규칙을 조인 경로·관계보다 앞에 출력하고, 테이블 규칙을 컬럼 페이지에도 붙인다. `update`는 페이지·용어·관계·조인 경로·규칙을 같은 버전 정책으로 수정한다.
+- 저장소: migration 2(schema v2). 실제 저장소는 갱신 전에 `%LOCALAPPDATA%\Buildlog\buildlog.v1-backup-20261026.sqlite3`으로 백업했고, 기존 기록 2건은 그대로 읽힌다.
+- CLI 계약: 응답 envelope에 `request_id`·`warnings`를 추가했다. 저장소 오류 종료 코드를 spec대로 6으로 바꿨다(5는 외부 조사 실패용).
+- 검증 명령: `.venv\Scripts\python.exe -m unittest discover -s tests` → 42개 통과(`tests/test_knowledge.py` 27개 추가).
+- 실제 스킬 경로 검증: `buildlog` 스킬로 `examples/demo_mes`(DDL, schema_json, Markdown, 텍스트, CSV·JSON 샘플)를 데모 저장소 `%LOCALAPPDATA%\Buildlog\demo.sqlite3`에 인제스트했다. 한 번에 저장됐고 결과는 페이지 9, 관계 8, 용어 4, 조인 경로 3, 규칙 5, 목차 6이다. DDL은 VIEW 1건 때문에 `partial`, 샘플 비밀번호 컬럼은 마스킹 경고가 났다. 스킬 읽기로 목차 → sensor_reading 페이지를 확인했다. 완료 조건별 확인 결과는 다음과 같다.
+  - 같은 용어의 맥락별 의미: "사업자번호"가 site·equipment·CRM 각각 다른 정의로 저장됐다.
+  - 3개 테이블 조인 경로: site → equipment → sensor_reading, 각 단계 1:N(스키마 키 근거).
+  - 1:N 중복 집계 주의점과 capacity_kw 합계 금칙이 저장됐다.
+  - reading_time 기간 필수 조건과 금칙이 저장됐다.
+  - 변경 이력 부재(확인됨)와 스트리밍 API(미확인)가 구분됐다.
+  - FK와 추정 연결(operator_code → emp_code)이 구분됐고, nullable 정보가 없는 컬럼은 "미확인"으로 남았다.
+  - 일반 설정 경험(`aae4c7c0-…`)에는 DB 섹션이 생기지 않았다.
+- 남은 일: 스킬 파일(`~/.claude/skills/buildlog/`)은 저장소 밖에 있어 Git으로 관리되지 않는다. Phase 2.3에서 Codex 스킬과 함께 저장소 안의 원본에서 설치하는 구조로 정리한다. 같은 세션 안에서는 스킬을 다시 호출해도 처음 불러온 내용이 표시되므로, 갱신한 스킬의 첫 실사용 확인은 새 세션에서 한다.
 
 각 Phase를 수행한 Codex는 이 절에 단계·상태·검증 명령·실행 결과·남은 장애를 갱신한다. 기술적으로 해결할 수 있는 장애는 먼저 해결하고, 사용자 입력 없이는 진행할 수 없을 때만 구체적인 조치를 요청한다.
