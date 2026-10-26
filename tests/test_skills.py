@@ -37,6 +37,17 @@ class SkillInstallTests(unittest.TestCase):
             second = install(["codex"], target_dirs={"codex": target})
             self.assertEqual({f["action"] for f in second["hosts"][0]["files"]}, {"unchanged"})
 
+    def test_installed_files_are_recognised_and_not_backed_up_again(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "claude"
+            install(["claude-code"], target_dirs={"claude-code": target})
+            for name in ("SKILL.md", "plan-format.md"):
+                self.assertIn(MARKER, (target / name).read_text(encoding="utf-8"))
+                # Simulate an older installed version: it must be replaced without a backup.
+                (target / name).write_text((target / name).read_text(encoding="utf-8") + "\nold\n", encoding="utf-8")
+            again = install(["claude-code"], target_dirs={"claude-code": target})
+            self.assertEqual([f["backup"] for f in again["hosts"][0]["files"]], [None, None])
+
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / "claude"

@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -20,24 +21,64 @@ def new_id() -> str:
     return str(uuid.uuid4())
 
 
+class _DryRun(Exception):
+    """Raised inside the planning transaction so that everything it wrote is rolled back."""
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        super().__init__("dry run")
+        self.result = result
+
+
+def _reuse(connection: sqlite3.Connection, run: Any, input_hash: str, raw_plan: Any) -> dict[str, Any]:
+    result = json.loads(run["result_json"])
+    if run["input_hash"] != input_hash and not _matches_legacy_hash(connection, run["input_hash"], result, raw_plan):
+        raise ConflictError(f"IDEMPOTENCY_CONFLICT: key was used with different input (existing run {result.get('run_id')})")
+    result["reused"] = True
+    return result
+
+
+def _summary(result: dict[str, Any]) -> dict[str, Any]:
+    return {"create": {k: len(v) for k, v in result["created"].items()}, "update": len(result["updated"]),
+            "unchanged": len(result["unchanged"]), "status": result["status"]}
+
+
 def ingest(store: Path, raw_plan: Any) -> dict[str, Any]:
-    plan, input_hash = normalize_plan(raw_plan)
+    """Save a plan through received → normalized → planned → committed.
+
+    Only the last stage writes data, in one transaction with the `committed` mark. Earlier
+    failures are kept on the run row; a retry with the same key starts that row again.
+    """
+    from . import runs
+
+    key = raw_plan.get("idempotency_key") if isinstance(raw_plan, dict) else None
+    if not isinstance(key, str) or not key.strip():
+        normalize_plan(raw_plan)  # raises the precise validation error; there is no key to record a run under
+        raise ValidationError("idempotency_key must be a non-empty string")
     db.initialize(store)
-    # The idempotency check runs inside the locked transaction so two concurrent
-    # saves of the same key cannot both write.
-    with db.write(store) as connection:
-        existing = connection.execute(
-            "SELECT input_hash, result_json FROM runs WHERE idempotency_key = ?", (plan["idempotency_key"],)
-        ).fetchone()
-        if existing is not None:
-            result = json.loads(existing["result_json"])
-            if existing["input_hash"] != input_hash and not _matches_legacy_hash(connection, existing["input_hash"], result, raw_plan):
-                raise ConflictError(
-                    f"IDEMPOTENCY_CONFLICT: key was used with different input (existing run {result.get('run_id')})"
-                )
-            result["reused"] = True
-            return result
-        return _Apply(connection, store, plan, input_hash).run()
+    run = runs.receive(store, key)
+    if run["status"] == "succeeded":
+        plan, input_hash = normalize_plan(raw_plan)  # a committed run is never marked failed
+        with closing(db.connect(store)) as connection:
+            return _reuse(connection, run, input_hash, raw_plan)
+    run_id = run["id"]
+    try:
+        plan, input_hash = normalize_plan(raw_plan)
+        runs.advance(store, run_id, "normalized", input_hash=input_hash)
+        # Planning: apply the whole plan against the current store and roll it back. Every reference,
+        # conflict and schema check runs here, before anything is kept.
+        try:
+            with db.write(store) as connection:
+                raise _DryRun(_Apply(connection, store, plan, input_hash, run_id).run())
+        except _DryRun as dry:
+            runs.advance(store, run_id, "planned", summary=_summary(dry.result))
+        with db.write(store) as connection:
+            current = connection.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if current["status"] == "succeeded":  # another attempt with the same key committed first
+                return _reuse(connection, current, input_hash, raw_plan)
+            return _Apply(connection, store, plan, input_hash, run_id).run()
+    except BaseException as error:
+        runs.fail(store, run_id, error)
+        raise
 
 
 def _matches_legacy_hash(connection: sqlite3.Connection, stored_hash: str, result: dict[str, Any], raw_plan: Any) -> bool:
@@ -63,13 +104,13 @@ def _fold(value: str | None) -> str:
 
 
 class _Apply:
-    def __init__(self, connection: sqlite3.Connection, store: Path, plan: dict[str, Any], input_hash: str) -> None:
+    def __init__(self, connection: sqlite3.Connection, store: Path, plan: dict[str, Any], input_hash: str, run_id: str) -> None:
         self.c = connection
         self.store = store
         self.plan = plan
         self.input_hash = input_hash
         self.ts = db.now()
-        self.run_id = new_id()
+        self.run_id = run_id
         self.page_refs: dict[str, str] = {}
         self.source_ids: dict[str, str] = {}
         self.evidence_ids: dict[str, str] = {}
@@ -78,6 +119,7 @@ class _Apply:
         self.reused: list[dict[str, Any]] = []
         self.warnings: list[str] = list(plan["warnings"])
         self.touched: set[str] = set()  # pages whose search index rows must be refreshed
+        self.source_state: dict[str, tuple[str, list[dict[str, Any]]]] = {}  # parse status found while applying
 
     # ------------------------------------------------------------ helpers
 
@@ -213,11 +255,6 @@ class _Apply:
     # ------------------------------------------------------------ steps
 
     def run(self) -> dict[str, Any]:
-        self.c.execute(
-            """INSERT INTO runs(id, idempotency_key, input_hash, stage, status, research_status, created_at, updated_at)
-               VALUES (?, ?, ?, 'normalized', 'running', 'not_requested', ?, ?)""",
-            (self.run_id, self.plan["idempotency_key"], self.input_hash, self.ts, self.ts),
-        )
         for source in self.plan["sources"]:
             self._source(source)
         for item in self.plan["evidence"]:
@@ -270,23 +307,41 @@ class _Apply:
             "created": self.created,
             "updated": self.updated,
             "unchanged": self.reused,
-            "sources": [
-                {"ref": s["ref"], "id": self.source_ids[s["ref"]], "kind": s["kind"], "parse_status": s["parse_status"],
-                 "diagnostics": s["diagnostics"]}
-                for s in self.plan["sources"]
-            ],
+            "sources": [self._source_report(s) for s in self.plan["sources"]],
             "warnings": self.warnings,
             "research_status": "pending" if self.plan["research"] else "not_requested",
         }
-        host_pages =[p for p in self.created.get("pages", []) if p.get("ref") is not None]
+        # Saved, but not everything given was read: say so instead of reporting full success.
+        partial = [s["ref"] for s in result["sources"] if s["parse_status"] == "partial"]
+        result["status"] = "partial" if partial else "complete"
+        if partial:
+            result["partial_sources"] = partial
+        host_pages = [p for p in self.created.get("pages", []) if p.get("ref") is not None]
         if len(host_pages) == 1:
             result["page_id"] = host_pages[0]["id"]
             result["version"] = 1
         self.c.execute(
-            "UPDATE runs SET stage = 'committed', status = 'succeeded', result_json = ?, updated_at = ? WHERE id = ?",
-            (to_json(result), self.ts, self.run_id),
+            """UPDATE runs SET stage = 'committed', status = 'succeeded', input_hash = ?, result_json = ?, error = NULL,
+                               error_kind = NULL, updated_at = ? WHERE id = ?""",
+            (self.input_hash, to_json(result), self.ts, self.run_id),
         )
         return result
+
+    def _source_report(self, source: dict[str, Any]) -> dict[str, Any]:
+        status, diagnostics = self.source_state.get(source["ref"], (source["parse_status"], source["diagnostics"]))
+        report = {"ref": source["ref"], "id": self.source_ids[source["ref"]], "kind": source["kind"],
+                  "parse_status": status, "diagnostics": diagnostics}
+        if source["metadata"].get("from_source"):
+            report["from_source"] = source["metadata"]["from_source"]
+        return report
+
+    def _mark_partial(self, source: dict[str, Any], message: str) -> None:
+        """Record that part of a source was not used, on the stored source row and in the result."""
+        status, diagnostics = self.source_state.get(source["ref"], (source["parse_status"], list(source["diagnostics"])))
+        diagnostics = diagnostics + [{"severity": "partial", "message": message}]
+        self.source_state[source["ref"]] = ("partial", diagnostics)
+        self.c.execute("UPDATE sources SET parse_status = 'partial', diagnostics_json = ? WHERE id = ?",
+                       (to_json(diagnostics), self.source_ids[source["ref"]]))
 
     def _source(self, source: dict[str, Any]) -> None:
         source_id = new_id()
@@ -450,6 +505,7 @@ class _Apply:
             table = self.table(meta["system_key"], meta["table"], where)
         except ValidationError as error:
             self.warnings.append(f"{error}; the sample was stored but not linked to a table")
+            self._mark_partial(source, f"not linked: table {meta['table']!r} is not known in {meta['system_key']!r}")
             return
         table_meta = json.loads(table["metadata_json"])
         known = {_fold(c["name"]) for c in table_meta["columns"]}
@@ -457,6 +513,7 @@ class _Apply:
         unknown = sorted(seen - known)
         if unknown:
             self.warnings.append(f"{where}: sample columns {unknown} are not in table {meta['table']}")
+            self._mark_partial(source, f"columns {unknown} are not in table {meta['table']}")
         header = source["content"].split("\n", 1)[0] if source["kind"] == "sample_csv" else f"{len(source['rows'])} rows"
         evidence_id = self._add_evidence(self.source_ids[source["ref"]], f"sample of {meta['table']} ({len(source['rows'])} rows)",
                                          header, "observed", 1 if source["kind"] == "sample_csv" else None,

@@ -222,16 +222,29 @@ def _source(raw: Any, index: int, warnings: list[str]) -> dict[str, Any]:
         except json.JSONDecodeError as error:
             raise ValidationError(f"{where}: invalid schema_json: {error}") from error
         source["schema"] = normalize_schema_json(data, where)
-        source["metadata"]["system_key"] = source["schema"]["system_key"]
+        system_key = source["schema"]["system_key"]
+        source["metadata"]["system_key"] = system_key
         source["parse_status"] = "complete"
+        if data.get("source_ref") is not None:
+            source["metadata"]["declared_source_ref"] = require_text(data["source_ref"], f"{where}.source_ref")
+        unknown = sorted(set(data) - SCHEMA_JSON_KEYS)
+        if unknown:
+            source["parse_status"] = "partial"
+            source["diagnostics"].append({"severity": "partial", "message": f"top-level fields not read: {unknown}"})
+            warnings.append(f"{where}: schema_json fields {unknown} were not read")
+        samples = data.get("samples")
+        if samples:
+            if not isinstance(samples, list):
+                raise ValidationError(f"{where}.samples must be a list")
+            source["derived"] = [_embedded_sample(source, item, i, system_key, warnings) for i, item in enumerate(samples)]
+            # The rows now live in their own sample sources (capped and redacted); keep them out of the schema text.
+            content = json.dumps({k: v for k, v in data.items() if k != "samples"}, ensure_ascii=False, indent=2)
+            source["diagnostics"].append({"severity": "info", "message": f"{len(samples)} sample(s) stored as separate sample sources"})
     elif kind in {"sample_json", "sample_csv"}:
         system_key = check_system_key(raw.get("system_key"), f"{where}.system_key")
         table = require_text(raw.get("table"), f"{where}.table")
-        rows, sample_warnings, content = parse_sample(kind, content, where)
-        warnings.extend(sample_warnings)
-        source["rows"] = rows
-        source["metadata"].update({"system_key": system_key, "table": table, "row_count": len(rows)})
-        source["parse_status"] = "complete"
+        source["metadata"].update({"system_key": system_key, "table": table})
+        content = _read_sample(source, kind, content, where, warnings)
     elif kind in {"markdown", "text"}:
         source["parse_status"] = "complete"
 
@@ -244,6 +257,55 @@ def _source(raw: Any, index: int, warnings: list[str]) -> dict[str, Any]:
     excerpt = raw.get("accessible_excerpt", default_excerpt)
     source["accessible_excerpt"] = require_text(excerpt, f"{where}.accessible_excerpt")
     return source
+
+
+SCHEMA_JSON_KEYS = {"system_key", "tables", "samples", "source_ref"}
+
+
+def _read_sample(source: dict[str, Any], kind: str, content: str, where: str, warnings: list[str]) -> str:
+    """One path for every sample, standalone or embedded in schema_json. Returns the stored text."""
+    rows, sample_warnings, normalized, dropped = parse_sample(kind, content, where)
+    warnings.extend(sample_warnings)
+    source["rows"] = rows
+    source["metadata"]["row_count"] = len(rows)
+    source["parse_status"] = "complete"
+    if dropped:
+        source["parse_status"] = "partial"
+        source["diagnostics"].append({"severity": "partial", "message": f"kept the first {len(rows)} rows; {dropped} row(s) were not stored"})
+    return normalized
+
+
+def _embedded_sample(parent: dict[str, Any], item: Any, index: int, system_key: str, warnings: list[str]) -> dict[str, Any]:
+    """schema_json.samples[i] → its own sample source: {"table", "rows": [...]} or {"table", "format": "csv"|"json", "content"}."""
+    where = f"{parent['ref']}.samples[{index}]"
+    if not isinstance(item, dict):
+        raise ValidationError(f"{where} must be an object")
+    table = require_text(item.get("table"), f"{where}.table")
+    if "rows" in item:
+        if not isinstance(item["rows"], list):
+            raise ValidationError(f"{where}.rows must be a list of row objects")
+        kind, text = "sample_json", json.dumps(item["rows"], ensure_ascii=False)
+    elif "content" in item:
+        fmt = _choice(item.get("format"), {"csv", "json"}, f"{where}.format")
+        kind, text = f"sample_{fmt}", require_text(item["content"], f"{where}.content")
+    else:
+        raise ValidationError(f"{where} needs rows or content")
+    extra = sorted(set(item) - {"table", "rows", "content", "format"})
+    sample: dict[str, Any] = {
+        "ref": f"{parent['ref']}#samples[{index}]", "kind": kind, "captured_at": parent["captured_at"],
+        "locator": f"{parent['locator']} · samples[{index}]", "content": None, "content_hash": None,
+        "metadata": {"system_key": system_key, "table": table, "from_source": parent["ref"], "pointer": f"/samples/{index}"},
+        "parse_status": None, "diagnostics": [], "schema": None, "rows": None, "replace_existing_schema": False,
+    }
+    text = _read_sample(sample, kind, text, where, warnings)
+    if extra:
+        sample["parse_status"] = "partial"
+        sample["diagnostics"].append({"severity": "partial", "message": f"fields not read: {extra}"})
+        warnings.append(f"{where}: fields {extra} were not read")
+    sample["content"] = text
+    sample["content_hash"] = sha256(text)
+    sample["accessible_excerpt"] = " ".join(text.split())[:200] or f"sample of {table}"
+    return sample
 
 
 def _locate(content: str, excerpt: str) -> list[tuple[int, int]]:
@@ -535,7 +597,9 @@ def normalize_plan(raw: Any) -> tuple[dict[str, Any], str]:
     plan = _empty_plan(require_text(raw.get("idempotency_key"), "idempotency_key"))
     warnings: list[str] = plan["warnings"]
 
-    plan["sources"] = [_source(item, i, warnings) for i, item in enumerate(_list(raw, "sources"))]
+    sources = [_source(item, i, warnings) for i, item in enumerate(_list(raw, "sources"))]
+    # Samples embedded in schema_json follow their schema as sources of their own.
+    plan["sources"] = [s for source in sources for s in [source, *source.pop("derived", [])]]
     _unique_refs(plan["sources"], "source")
     sources = {s["ref"]: s for s in plan["sources"]}
     plan["evidence"] = [_evidence(item, i, sources) for i, item in enumerate(_list(raw, "evidence"))]

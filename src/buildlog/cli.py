@@ -26,7 +26,10 @@ EXIT_INPUT, EXIT_CONFLICT, EXIT_NOT_FOUND, EXIT_RESEARCH, EXIT_STORE = 2, 3, 4, 
 
 
 def _store(value: str | None) -> Path:
-    return Path(value).expanduser() if value else default_store_path()
+    # --store > BUILDLOG_STORE > config file > default
+    from .config import resolve_store
+
+    return resolve_store(value)
 
 
 def _load_json(path: str) -> Any:
@@ -91,25 +94,56 @@ def build_parser() -> argparse.ArgumentParser:
     research_parser.add_argument("--question", help="new question to attach to --page and run now")
     research_parser.add_argument("--context", default="", help="short context for --question")
     research_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds agy may spend per question")
-    research_parser.add_argument("--agy", help="path to agy.exe (default: BUILDLOG_AGY or %%LOCALAPPDATA%%\\agy\\bin\\agy.exe)")
+    research_parser.add_argument("--agy", help="path to agy.exe (default: BUILDLOG_AGY, then the config file, then %%LOCALAPPDATA%%\\agy\\bin\\agy.exe)")
     research_parser.add_argument("--retry-succeeded", action="store_true", help="also re-run requests that already succeeded")
     research_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     skill_parser = commands.add_parser("install-skill", help="install the Buildlog skill for Claude Code and/or Codex")
     skill_parser.add_argument("--host", choices=("claude-code", "codex", "all"), default="all")
     skill_parser.add_argument("--dry-run", action="store_true")
+    config_parser = commands.add_parser("config", help="show or change shared settings (store, agy)")
+    config_parser.add_argument("action", choices=("show", "set", "unset"))
+    config_parser.add_argument("key", nargs="?", choices=("store", "agy"))
+    config_parser.add_argument("value", nargs="?")
+    runs_parser = commands.add_parser("runs", help="list save runs with their stage, status and preserved errors")
+    runs_parser.add_argument("--status", choices=("running", "failed", "succeeded"))
+    runs_parser.add_argument("--limit", type=int, default=20)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    store = _store(args.store)
     request_id = str(uuid.uuid4())
     try:
+        store = _store(args.store)
+        if args.command == "config":
+            from .config import set_value, show
+
+            if args.action == "show":
+                data = show(args.store)
+            elif args.action == "set":
+                if not args.key or not args.value:
+                    raise ValidationError("config set needs a key and a value")
+                data = set_value(args.key, args.value)
+            else:
+                if not args.key:
+                    raise ValidationError("config unset needs a key")
+                data = set_value(args.key, None)
+            _write(sys.stdout, _envelope(request_id, "ok", data))
+            return 0
+        if args.command == "runs":
+            from .runs import list_runs
+
+            data, warnings = list_runs(store, args.status, args.limit), []
+            _write(sys.stdout, _envelope(request_id, "ok", data, warnings))
+            return 0
         if args.command == "init":
             data, warnings = initialize(store), []
         elif args.command == "ingest":
             data = ingest(store, _load_json(args.input))
-            warnings = data.get("warnings", [])
+            # Saved, but part of the input was not read: never report that as plain "ok".
+            status = "partial" if data.get("status") == "partial" else "ok"
+            _write(sys.stdout, _envelope(request_id, status, data, data.get("warnings", [])))
+            return 0
         elif args.command == "read":
             record = read_object(store, args.object_id)
             if args.format == "markdown":

@@ -69,8 +69,9 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(second["reused"])
 
     def test_missing_capture_time_does_not_change_idempotency_hash(self) -> None:
-        with patch("buildlog.db.now", side_effect=["2026-10-26T00:00:00Z", "2026-10-26T00:01:00Z"]):
+        with patch("buildlog.db.now", return_value="2026-10-26T00:00:00Z"):
             first = ingest(self.store, sample_plan())
+        with patch("buildlog.db.now", return_value="2026-10-26T00:01:00Z"):
             second = ingest(self.store, sample_plan())
         self.assertEqual(first["page_id"], second["page_id"])
         self.assertTrue(second["reused"])
@@ -94,7 +95,12 @@ class StoreTests(unittest.TestCase):
         invalid["page"] = {"title": "불완전"}
         with self.assertRaises(ValidationError):
             ingest(self.store, invalid)
-        self.assertFalse(self.store.exists())
+        # No data, but the failed attempt is kept with its stage and reason.
+        self.assertEqual({k: v for k, v in _row_counts(self.store).items() if k != "runs"},
+                         {"pages": 0, "sources": 0, "evidence": 0, "page_sources": 0, "revisions": 0})
+        run = _run(self.store, "phase-1-test")
+        self.assertEqual((run["stage"], run["status"], run["error_kind"]), ("received", "failed", "validation"))
+        self.assertIn("page.summary_md", run["error"])
 
     def test_credentials_are_rejected(self) -> None:
         invalid = sample_plan()
@@ -110,7 +116,8 @@ class StoreTests(unittest.TestCase):
         invalid["page"] = {"title": "불완전"}
         with self.assertRaises(ValidationError):
             ingest(self.store, invalid)
-        self.assertEqual(_row_counts(self.store), before)
+        self.assertEqual(_data_counts(self.store), _data_counts_of(before))
+        self.assertEqual(_run(self.store, "another-key")["status"], "failed")
         self.assertEqual(read_page(self.store, created["page_id"])["page"]["version"], 1)
 
     def test_failure_mid_write_rolls_back_every_row(self) -> None:
@@ -123,18 +130,26 @@ class StoreTests(unittest.TestCase):
             {"section_locator": "b", "excerpt": "second", "evidence_kind": "observed"},
         ]
         # Ids are handed out as run, source, evidence 1, evidence 2. The second evidence
-        # row reuses the first one's id, so its insert fails after the run, source and
-        # first evidence rows were already written in the same transaction.
+        # row reuses the first one's id, so its insert fails after the source and first
+        # evidence rows were already written in the same transaction.
         def ids():
             yield from (uuid.UUID(int=i) for i in (1, 2, 3, 3))
+            n = 100
             while True:
-                yield uuid.uuid4()
+                n += 1
+                yield uuid.UUID(int=n)
         with patch("buildlog.ingest.uuid.uuid4", side_effect=ids()):
             with self.assertRaises(sqlite3.IntegrityError):
                 ingest(self.store, plan)
-        self.assertEqual(_row_counts(self.store), before)
-        # The key was not consumed by the failed attempt.
-        self.assertFalse(ingest(self.store, plan)["reused"])
+        self.assertEqual(_data_counts(self.store), _data_counts_of(before))
+        failed = _run(self.store, "rollback-test")
+        self.assertEqual((failed["stage"], failed["status"], failed["error_kind"]), ("normalized", "failed", "store"))
+        # A save retry with the same key reuses the failed run and commits once.
+        retried = ingest(self.store, plan)
+        self.assertFalse(retried["reused"])
+        self.assertEqual(retried["run_id"], failed["id"])
+        run = _run(self.store, "rollback-test")
+        self.assertEqual((run["stage"], run["status"], run["attempts"], run["error"]), ("committed", "succeeded", 2, None))
 
     def test_update_keeps_every_revision(self) -> None:
         created = ingest(self.store, sample_plan())
@@ -233,6 +248,20 @@ class CliProcessTests(unittest.TestCase):
 
         not_found = self.run_cli("read", "no-such-id")
         self.assertEqual(not_found.returncode, 4)
+
+
+def _data_counts_of(counts: dict[str, int]) -> dict[str, int]:
+    return {k: v for k, v in counts.items() if k != "runs"}
+
+
+def _data_counts(store: Path) -> dict[str, int]:
+    return _data_counts_of(_row_counts(store))
+
+
+def _run(store: Path, key: str) -> dict[str, object]:
+    with closing(sqlite3.connect(store)) as connection:
+        connection.row_factory = sqlite3.Row
+        return dict(connection.execute("SELECT * FROM runs WHERE idempotency_key = ?", (key,)).fetchone())
 
 
 def _row_counts(store: Path) -> dict[str, int]:

@@ -101,8 +101,11 @@ def _redact_row(row: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     return clean, redacted
 
 
-def parse_sample(kind: str, content: str, where: str) -> tuple[list[dict[str, Any]], list[str], str]:
-    """Return (rows, warnings, normalized_content). Credential-named columns are redacted."""
+def parse_sample(kind: str, content: str, where: str) -> tuple[list[dict[str, Any]], list[str], str, int]:
+    """Return (rows, warnings, normalized_content, dropped_rows).
+
+    Only the first MAX_SAMPLE_ROWS rows are kept; credential-named columns are redacted.
+    """
     warnings: list[str] = []
     if kind == "sample_json":
         try:
@@ -119,7 +122,8 @@ def parse_sample(kind: str, content: str, where: str) -> tuple[list[dict[str, An
         if not reader.fieldnames:
             raise ValidationError(f"{where}: CSV sample needs a header row")
         rows = [dict(r) for r in reader]
-    if len(rows) > MAX_SAMPLE_ROWS:
+    dropped = max(0, len(rows) - MAX_SAMPLE_ROWS)
+    if dropped:
         warnings.append(f"{where}: kept the first {MAX_SAMPLE_ROWS} of {len(rows)} sample rows")
         rows = rows[:MAX_SAMPLE_ROWS]
     clean_rows = []
@@ -139,4 +143,4 @@ def parse_sample(kind: str, content: str, where: str) -> tuple[list[dict[str, An
         writer.writeheader()
         writer.writerows(clean_rows)
         normalized = out.getvalue()
-    return clean_rows, warnings, normalized
+    return clean_rows, warnings, normalized, dropped

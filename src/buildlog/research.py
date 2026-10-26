@@ -90,18 +90,10 @@ class AgyError(Exception):
 
 
 def default_agy() -> list[str]:
-    # BUILDLOG_AGY_COMMAND: a JSON list, for wrappers such as ["python", "fake_agy.py"].
-    command = os.environ.get("BUILDLOG_AGY_COMMAND")
-    if command:
-        value = json.loads(command)
-        if not isinstance(value, list) or not value or not all(isinstance(v, str) for v in value):
-            raise ValidationError("BUILDLOG_AGY_COMMAND must be a JSON list of strings")
-        return value
-    configured = os.environ.get("BUILDLOG_AGY")
-    if configured:
-        return [configured]
-    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    return [str(local / "agy" / "bin" / "agy.exe")]
+    """agy command from the shared settings (environment > config file > default)."""
+    from .config import resolve_agy
+
+    return resolve_agy(None)
 
 
 def _valid_url(url: str) -> bool:
@@ -307,8 +299,14 @@ def run_research(store: Path, run_id: str | None = None, page_id: str | None = N
     db.initialize(store)
     agy = agy or default_agy()
     with closing(db.connect(store)) as c:
-        if run_id and c.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,)).fetchone() is None:
-            raise NotFoundError(f"run not found: {run_id}")
+        if run_id:
+            run = c.execute("SELECT status, stage FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise NotFoundError(f"run not found: {run_id}")
+            if run["status"] != "succeeded":
+                # Research resumes requests of a saved experience; a failed save is retried with ingest instead.
+                raise ValidationError(f"run {run_id} is not committed (stage {run['stage']}, status {run['status']}); "
+                                      "retry the save with the same idempotency_key first")
         todo = _requests(c, run_id, page_id, request_ids, include_done=retry_succeeded)
         already = [r for r in _requests(c, run_id, page_id, request_ids, include_done=True) if r["status"] == "succeeded"]
     results = []

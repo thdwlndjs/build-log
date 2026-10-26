@@ -228,7 +228,15 @@ MIGRATIONS: list[list[str]] = [
         "CREATE INDEX research_requests_run ON research_requests(run_id)",
         "CREATE INDEX research_requests_page ON research_requests(page_id)",
     ],
+    # 5: run stages received → normalized → planned → committed with preserved failures.
+    # A failed run keeps its stage and error; a retry with the same key reuses the row.
+    [
+        "ALTER TABLE runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE runs ADD COLUMN error_kind TEXT",
+        "ALTER TABLE runs ADD COLUMN plan_summary_json TEXT",
+    ],
 ]
+RUN_STAGES = ("received", "normalized", "planned", "committed")
 RESEARCH_STATUSES = {"pending", "running", "succeeded", "failed"}
 SCHEMA_VERSION = len(MIGRATIONS)
 # Versions whose migration also needs the search index rebuilt from existing rows.

@@ -293,7 +293,8 @@ class ValidationTests(Base):
         with self.assertRaises(ValidationError) as raised:
             ingest(self.store, plan)
         self.assertIn("not found in source", str(raised.exception))
-        self.assertFalse(self.store.exists())
+        self.assertEqual(self.query("SELECT COUNT(*) FROM pages")[0][0], 0)
+        self.assertEqual([tuple(r) for r in self.query("SELECT stage, status FROM runs")], [("received", "failed")])
 
     def test_cardinality_without_basis_is_rejected(self) -> None:
         plan = demo_plan()
@@ -332,8 +333,13 @@ class ValidationTests(Base):
         plan["rules"][0]["scope"] = "demo_mes:no_such_table"
         with self.assertRaises(ValidationError):
             ingest(self.store, plan)
-        self.assertEqual(self.query("SELECT COUNT(*) FROM pages")[0][0], 0)
-        self.assertEqual(self.query("SELECT COUNT(*) FROM runs")[0][0], 0)
+        # The reference is checked while planning against the store: nothing is kept, and the
+        # failure stays on the run at the stage it reached.
+        for table in ("pages", "sources", "evidence", "relations", "term_senses", "rules", "join_paths", "search_index"):
+            self.assertEqual(self.query(f"SELECT COUNT(*) FROM {table}")[0][0], 0, table)
+        run = self.query("SELECT stage, status, error_kind, error FROM runs")[0]
+        self.assertEqual((run["stage"], run["status"], run["error_kind"]), ("normalized", "failed", "validation"))
+        self.assertIn("no_such_table", run["error"])
 
     def test_ambiguous_table_across_schemas(self) -> None:
         sql = "CREATE TABLE a.t (id int PRIMARY KEY);\nCREATE TABLE b.t (id int PRIMARY KEY);\n"
