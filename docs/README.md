@@ -21,6 +21,17 @@
 
 # 버전을 확인하고 수정
 .\.venv\Scripts\python.exe -m buildlog update <id> --expected-version 1 --patch .\patch.json --reason "정정 이유"
+
+# 질문으로 관련 기록 찾기 (작업 에이전트용 Markdown, 또는 --format json)
+.\.venv\Scripts\python.exe -m buildlog query "ORA-12541 오류" --term listener --scope demo_mes
+.\.venv\Scripts\python.exe -m buildlog query --input .\query.json
+
+# 관계, 조인 경로
+.\.venv\Scripts\python.exe -m buildlog neighbors <page_id> --type JOINS_TO --direction out
+.\.venv\Scripts\python.exe -m buildlog paths --system demo_mes --from site --to sensor_reading
+
+# 검색 색인 재구축 (색인은 언제든 다시 만들 수 있는 파생 데이터)
+.\.venv\Scripts\python.exe -m buildlog reindex
 ```
 
 ## Claude Code에서 사용
@@ -29,9 +40,29 @@
 
 - "이 문제 해결한 거 buildlog에 저장해줘" → 대화의 경험을 정리해 저장
 - "이 DDL이랑 운영 문서 buildlog에 인제스트해줘" → 테이블·컬럼·용어·조인 경로·규칙으로 정리해 저장
+- "예전에 이 오류 본 적 있어? buildlog에서 찾아줘" → 검색어를 보강해 조회하고 관련 기록과 규칙을 작업에 적용
 - "buildlog에서 `<id>` 읽어줘" → Markdown으로 보여줌
 
-유사 기록 검색은 Phase 2.2에서 추가됩니다.
+## 검색
+
+`query`는 질문 단어와 호스트가 보강한 검색어(`terms`)로 후보를 찾고, 작업 에이전트가 그대로 읽을 Markdown 묶음을 돌려줍니다.
+
+- 색인: 페이지 제목·별칭·요약·본문, 그리고 페이지에 연결된 용어 정의·규칙·조인 경로·컬럼 이름을 SQLite FTS5 trigram으로 색인합니다. 한국어 조사("파티션을")는 떼고 찾습니다. 3자 미만 검색어는 제목·별칭·요약에서만 찾습니다. 질문 속 FTS 문법은 일반 글자로 취급합니다.
+- 순위: 제목·별칭 일치에 가중치를 두고, 오류 코드·명령 이름 같은 식별자가 정확히 일치하면 크게 올립니다. 대체(superseded)·폐기(deprecated)된 기록은 내립니다. 최고 점수의 20%에 못 미치는 후보는 고르지 않습니다.
+- 범위(`scope`): 시스템 키를 주면 그 시스템의 테이블과 연결된 기록만 고릅니다. 환경 단어를 주면 제목·요약·`## 환경` 섹션에서만 판단합니다. 범위 밖 후보는 숨기지 않고 "다른 범위의 후보"로 따로 보여줍니다.
+- 기본값: 후보 20, 본문을 넣는 기록 5, 관계 1단계 확장 최대 10, 출력 예산 24,000 bytes.
+
+출력 순서:
+
+1. 반드시 지킬 규칙: 선택한 기록의 필수 조건·금칙·미지원 연산, 그리고 함께 전달한 조인 경로가 지나는 테이블의 규칙. 예산 때문에 본문이 빠진 기록의 규칙도 남깁니다.
+2. 질문에 나온 용어: 같은 표현의 모든 맥락별 정의와 범위 일치 여부
+3. 상충·정정 기록: CONTRADICTS, SUPERSEDES 관계
+4. 기록 본문: 기록 단위로만 넣고 중간에 자르지 않습니다.
+5. 관련 기록, 다른 범위의 후보, 생략한 기록(ID와 읽는 방법)
+
+첫 기록조차 예산에 들어가지 않으면 잘라내지 않고 `BUDGET_TOO_SMALL`과 필요한 크기를 돌려줍니다. 결과가 없으면 "관련 기록을 찾지 못했다"고 반환합니다.
+
+`paths`는 등록된 조인 경로를 먼저 돌려줍니다. 없으면 JOINS_TO 관계로 깊이 4 이내의 후보를 최대 5개 찾아 **추정 후보**로 표시합니다.
 
 ## 저장 계획
 
