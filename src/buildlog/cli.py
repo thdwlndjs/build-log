@@ -4,10 +4,18 @@ import argparse
 import json
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
-from .store import BuildlogError, ConflictError, NotFoundError, ValidationError, default_store_path, ingest, initialize, read_page, render_markdown, update_page
+from .store import (
+    BuildlogError, ConflictError, NotFoundError, ValidationError, default_store_path, ingest, initialize,
+    read_object, render_markdown, update_object,
+)
+
+ENVELOPE_VERSION = 1
+# Exit codes (spec §9): 0 ok, 2 invalid input, 3 conflict, 4 not found, 5 external research failure, 6 store failure.
+EXIT_INPUT, EXIT_CONFLICT, EXIT_NOT_FOUND, EXIT_STORE = 2, 3, 4, 6
 
 
 def _store(value: str | None) -> Path:
@@ -16,21 +24,20 @@ def _store(value: str | None) -> Path:
 
 def _load_json(path: str) -> Any:
     if path == "-":
-        return json.load(sys.stdin)
-    with Path(path).open(encoding="utf-8") as stream:
+        return json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
+    with Path(path).open(encoding="utf-8-sig") as stream:
         return json.load(stream)
 
 
-def _output(data: dict[str, Any]) -> None:
-    _write_stdout(json.dumps({"schema_version": 1, "status": "ok", "data": data}, ensure_ascii=False) + "\n")
+def _write(stream: Any, value: str) -> None:
+    stream.buffer.write(value.encode("utf-8"))
+    stream.flush()
 
 
-def _write_stdout(value: str) -> None:
-    sys.stdout.buffer.write(value.encode("utf-8"))
-
-
-def _write_stderr(value: str) -> None:
-    sys.stderr.buffer.write(value.encode("utf-8"))
+def _envelope(request_id: str, status: str, data: Any = None, warnings: list[str] | None = None, error: str | None = None) -> str:
+    payload = {"schema_version": ENVELOPE_VERSION, "request_id": request_id, "status": status, "data": data,
+               "warnings": warnings or [], "error": error}
+    return json.dumps(payload, ensure_ascii=False) + "\n"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,12 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init")
     ingest_parser = commands.add_parser("ingest")
-    ingest_parser.add_argument("--input", required=True, help="UTF-8 JSON file, or - for stdin")
+    ingest_parser.add_argument("--input", required=True, help="UTF-8 JSON save plan file, or - for stdin")
     read_parser = commands.add_parser("read")
-    read_parser.add_argument("page_id")
+    read_parser.add_argument("object_id", help="id of a page, term, relation, join path, or rule")
     read_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     update_parser = commands.add_parser("update")
-    update_parser.add_argument("page_id")
+    update_parser.add_argument("object_id", help="id of a page, term, relation, join path, or rule")
     update_parser.add_argument("--expected-version", required=True, type=int)
     update_parser.add_argument("--patch", required=True, help="UTF-8 JSON file, or - for stdin")
     update_parser.add_argument("--reason", required=True)
@@ -54,36 +61,38 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     store = _store(args.store)
+    request_id = str(uuid.uuid4())
     try:
         if args.command == "init":
-            _output(initialize(store))
+            data, warnings = initialize(store), []
         elif args.command == "ingest":
-            _output(ingest(store, _load_json(args.input)))
+            data = ingest(store, _load_json(args.input))
+            warnings = data.get("warnings", [])
         elif args.command == "read":
-            record = read_page(store, args.page_id)
+            record = read_object(store, args.object_id)
             if args.format == "markdown":
-                _write_stdout(render_markdown(record))
-            else:
-                _output(record)
-        elif args.command == "update":
+                _write(sys.stdout, render_markdown(record))
+                return 0
+            data, warnings = record, []
+        else:
             patch = _load_json(args.patch)
             if not isinstance(patch, dict):
                 raise ValidationError("patch input must be a JSON object")
-            _output(update_page(store, args.page_id, args.expected_version, patch, args.reason))
+            data, warnings = update_object(store, args.object_id, args.expected_version, patch, args.reason), []
+        _write(sys.stdout, _envelope(request_id, "ok", data, warnings))
         return 0
     except ConflictError as error:
-        return _error(error, 3)
+        return _fail(request_id, error, EXIT_CONFLICT)
     except NotFoundError as error:
-        return _error(error, 4)
+        return _fail(request_id, error, EXIT_NOT_FOUND)
     except (BuildlogError, json.JSONDecodeError, UnicodeDecodeError, OSError) as error:
-        return _error(error, 2)
+        return _fail(request_id, error, EXIT_INPUT)
     except sqlite3.Error as error:
-        return _error(f"store error: {error}", 5)
+        return _fail(request_id, f"store error: {error}", EXIT_STORE)
 
 
-def _error(error: object, code: int) -> int:
-    payload = {"schema_version": 1, "status": "error", "error": str(error)}
-    _write_stderr(json.dumps(payload, ensure_ascii=False) + "\n")
+def _fail(request_id: str, error: object, code: int) -> int:
+    _write(sys.stderr, _envelope(request_id, "error", error=str(error)))
     return code
 
 
