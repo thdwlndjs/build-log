@@ -149,7 +149,7 @@ PRD R01–R13의 검증 결과와 실제 실행 근거를 남긴다. 사용자 �
 
 ## 8. 진행 기록
 
-현재 상태: Phase 2.2 완료(2026-10-26). 다음은 Phase 2.3.
+현재 상태: Phase 2.3 완료(2026-10-26). 다음은 Phase 3.
 
 ### Phase 1 — 2026-10-26 완료
 
@@ -203,5 +203,32 @@ PRD R01–R13의 검증 결과와 실제 실행 근거를 남긴다. 사용자 �
   - 환경 범위를 본문 전체에서 판정해 "프록시가 없는" 같은 부정 문장에 걸렸다. 이제 `## 환경` 섹션에서만 판정한다.
 - 참고 측정(정식 측정은 Phase 4): 합성 1,000페이지에서 query 30회 실행 시 중앙값 17ms, p95 46ms였다(목표 1초).
 - 남은 일: 검색은 단어 일치 기반이다. 뜻이 같고 단어가 다른 질문은 호스트가 `terms`로 보강해야 찾는다. 스킬 지침에 이를 명시했다.
+
+### Phase 2.3 — 2026-10-26 완료
+
+- 구현:
+  - `research.py`: Antigravity 조사 어댑터. 저장 계획의 `research` 요청이나 `research --page --question`으로 질문을 받는다. agy를 인자 배열로 빈 임시 폴더에서 실행한다(`--print --output-format json --json-schema --mode plan --print-timeout`, 권한 생략 옵션은 쓰지 않음). DB 쓰기 잠금은 agy 호출 밖에서만 잡는다.
+  - 성공 판정: agy의 종료 코드나 `status: SUCCESS`를 믿지 않는다. 스키마에 맞는 구조화 결과와 유효한 근거가 1건 이상 있을 때만 성공이다.
+  - 실패 분류와 재개: 실패는 7종(`not_installed`, `auth`, `permission`, `timeout`, `output`, `no_findings`, `process`)으로 나눈다. 조사가 실패해도 저장한 경험은 남고, 같은 명령으로 재개한다.
+  - 근거 저장: 근거마다 web 출처를 만들고 확보 수준(원문 확인 / 검색 결과 요약 / 모델 기억)과 리디렉션 링크 여부를 표시한다. 결론 수정은 호스트가 `update`로 한다.
+  - 스킬: 원본을 저장소 `skills/buildlog/`로 옮기고, `install-skill`로 Claude Code와 Codex에 호스트별 표기를 바꿔 설치한다. 설치기가 쓰지 않은 기존 파일은 백업한다.
+  - migration 4(research_requests), 종료 코드 5(`RESEARCH_FAILED`).
+- 검증 명령: `.venv\Scripts\python.exe -m unittest discover -s tests` → 78개 통과(`test_research.py` 14개, `test_skills.py` 4개 추가). 가짜 agy(`tests/fixtures/fake_agy.py`)는 실제 agy에서 관찰한 출력을 재생하고, 호출 인자 계약(plan 모드, 권한 생략 금지, 빈 작업 폴더)을 검사한다.
+- 실제 Antigravity 실행에서 관찰한 것:
+  - 인증 확인: `status SUCCESS`.
+  - 일반 조사 프롬프트: 셸 명령(RunCommand)이 자동 거부되어 결과가 비었다. 이것을 보고 프롬프트에 웹 검색·읽기 외 도구 금지를 넣었다.
+  - `--print-timeout` 초과: 종료 코드 0, `status SUCCESS`인데 stderr에만 시간 초과가 남았다. 판정 로직이 이를 처음에는 출력 오류로 잘못 분류해서 고쳤다.
+- 실제 조사 경로 검증:
+  - Claude Code 스킬로 이 대화의 경험("agy 헤드리스 실행이 SUCCESS인데 결과가 비는 두 경우", `f62436c8-…`)을 조사 질문 2개와 함께 저장했다.
+  - 제한 시간 15초로 실행: 두 질문 모두 `timeout`으로 실패(종료 코드 5)했고 경험은 남았다. 같은 명령으로 재개해 두 질문 모두 성공했다(근거 7건 + 7건).
+  - 원문 주소를 받으려고 프롬프트를 바꾼 뒤 다시 실행하자 4분 제한에 걸렸다. 이때 성공했던 요청이 실패로 내려가는 버그를 발견해 고쳤고, 프롬프트도 완화한 뒤 재개해 성공했다(근거 8건).
+- 두 호스트 검증(같은 저장소):
+  - Codex: `codex exec`(workspace-write, 승인 없음, 쓰기 허용은 `%LOCALAPPDATA%\Buildlog` 하나)로 실행했다. 설치된 Codex 스킬로 Claude Code가 저장한 기록을 검색해 제목·ID·판정 방법을 정확히 인용했고, 자기 확인 작업을 새 경험(`451bf2cc-…`, 키 `codex:2026-10-26:…`, 출처 "Codex conversation")으로 저장한 뒤 임시 JSON을 지웠다.
+  - Claude Code: Codex가 저장한 그 기록을 읽어 확인했다.
+- 남은 한계:
+  - agy 검색 도구는 원문 주소 대신 `vertexaisearch.cloud.google.com/grounding-api-redirect/...` 링크를 준다. 이번 근거 22건은 모두 검색 결과 요약 수준이며 리디렉션 링크는 만료될 수 있다. 원문 확인이 필요한 결론은 따로 확인해야 한다.
+  - 같은 질문을 다시 돌리면 리디렉션 URL이 달라 비슷한 근거가 중복으로 쌓인다(이번 페이지에 22건).
+  - 조사 1건에 1~4분이 걸린다.
+- 사용자 조치: Antigravity 로그인(완료).
 
 각 Phase를 수행한 Codex는 이 절에 단계·상태·검증 명령·실행 결과·남은 장애를 갱신한다. 기술적으로 해결할 수 있는 장애는 먼저 해결하고, 사용자 입력 없이는 진행할 수 없을 때만 구체적인 조치를 요청한다.

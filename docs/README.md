@@ -32,16 +32,44 @@
 
 # 검색 색인 재구축 (색인은 언제든 다시 만들 수 있는 파생 데이터)
 .\.venv\Scripts\python.exe -m buildlog reindex
+
+# Antigravity 외부 조사: 저장 계획의 research 요청 실행, 또는 기존 페이지에 질문 추가
+.\.venv\Scripts\python.exe -m buildlog research --run <run_id>
+.\.venv\Scripts\python.exe -m buildlog research --page <page_id> --question "질문" --context "맥락"
+
+# Claude Code·Codex 스킬 설치/갱신 (skills/buildlog/ 원본에서)
+.\.venv\Scripts\python.exe -m buildlog install-skill [--host claude-code|codex|all] [--dry-run]
 ```
 
-## Claude Code에서 사용
+## Claude Code·Codex에서 사용
 
-`C:\Users\aicam\.claude\skills\buildlog\`에 스킬이 설치돼 있습니다. 어느 프로젝트에서든 Claude Code에 요청하면 됩니다. 파일 읽기, JSON 작성, 명령 실행은 Claude가 합니다.
+두 호스트 모두 같은 프로그램과 같은 저장소를 씁니다. 스킬 원본은 저장소의 [skills/buildlog/](../skills/buildlog/)에 있고, `install-skill`이 호스트별 표기(대화 이름, `idempotency_key` 접두어, 파일 쓰는 방법, Python 절대 경로)만 바꿔 설치합니다.
+
+| 호스트 | 설치 위치 |
+| --- | --- |
+| Claude Code | `%USERPROFILE%\.claude\skills\buildlog\` |
+| Codex | `%USERPROFILE%\.codex\skills\buildlog\` (`CODEX_HOME`이 있으면 그 아래) |
+
+설치기가 쓰지 않은 기존 파일은 덮어쓰기 전에 `*.bak-<시각>`으로 백업합니다. 스킬을 고칠 때는 설치된 사본이 아니라 원본을 고치고 다시 설치합니다.
+
+어느 프로젝트에서든 요청하면 됩니다. 파일 읽기, JSON 작성, 명령 실행은 호스트 에이전트가 합니다.
 
 - "이 문제 해결한 거 buildlog에 저장해줘" → 대화의 경험을 정리해 저장
 - "이 DDL이랑 운영 문서 buildlog에 인제스트해줘" → 테이블·컬럼·용어·조인 경로·규칙으로 정리해 저장
 - "예전에 이 오류 본 적 있어? buildlog에서 찾아줘" → 검색어를 보강해 조회하고 관련 기록과 규칙을 작업에 적용
+- "이 기록 공식 문서 근거 조사해줘" → Antigravity로 조사해 출처를 연결
 - "buildlog에서 `<id>` 읽어줘" → Markdown으로 보여줌
+
+## 외부 조사 (Antigravity)
+
+`research`는 Antigravity CLI(`agy`)로 공식 문서 등의 근거를 찾아 기록에 출처로 연결합니다. 조사는 `ingest` 트랜잭션 밖에서 실행하므로, 조사가 실패해도 저장한 경험은 사라지지 않습니다.
+
+- 준비: `agy.exe`를 한 번 실행해 로그인합니다. 경로는 기본 `%LOCALAPPDATA%\agy\bin\agy.exe`이며 `BUILDLOG_AGY` 또는 `--agy`로 바꿀 수 있습니다.
+- 실행 방식: `agy --print … --output-format json --json-schema <파일> --mode plan --print-timeout <초>`를 인자 배열로, 빈 임시 폴더에서 실행합니다. 권한 생략 옵션(`--dangerously-skip-permissions`)은 쓰지 않고, 프롬프트로 웹 검색·읽기 외 도구를 금지합니다.
+- 성공 판정: agy는 권한 거부나 시간 초과 때도 종료 코드 0과 `status: SUCCESS`를 냅니다. 그래서 스키마에 맞는 구조화 결과와 유효한 근거가 1건 이상 있을 때만 성공으로 봅니다.
+- 실패 분류: `not_installed`, `auth`, `permission`, `timeout`, `output`, `no_findings`, `process`. 실패하면 종료 코드 5를 내고, 같은 명령으로 끝나지 않은 요청만 재개합니다. 이미 성공한 요청을 `--retry-succeeded`로 다시 돌리다 실패해도 기존 결과와 상태는 유지됩니다.
+- 저장: 근거마다 `web` 출처와 근거를 만들고 확보 수준을 남깁니다. 원문 확인(fetched)은 `observed`, 검색 결과 요약(search_snippet)과 모델 기억(from_memory)은 `reported`입니다. 검색 리디렉션 링크는 "원문 주소 아님"으로 표시합니다. 결론 수정은 하지 않습니다. 근거가 결론을 바꾸면 호스트가 `update`로 반영합니다.
+- 페이지 Markdown의 "외부 조사" 섹션에서 요청별 상태와 시도 횟수, 실패 원인을 볼 수 있습니다.
 
 ## 검색
 
@@ -66,7 +94,7 @@
 
 ## 저장 계획
 
-형식은 [plan-format.md](C:/Users/aicam/.claude/skills/buildlog/plan-format.md)에 있습니다. Phase 1 형식(`page` 하나)도 계속 받습니다.
+형식은 [plan-format.md](../skills/buildlog/plan-format.md)에 있습니다. Phase 1 형식(`page` 하나)도 계속 받습니다.
 
 | 입력 | 처리 |
 | --- | --- |
@@ -97,7 +125,7 @@ stdout에는 `{"schema_version", "request_id", "status", "data", "warnings", "er
 | 2 | 입력 오류(필수 필드 누락, 원문에 없는 인용, 근거 없는 주장, 알 수 없는 참조, 자격증명, 파일 없음) |
 | 3 | 충돌: `IDEMPOTENCY_CONFLICT`, `VERSION_CONFLICT`, `SCHEMA_CONFLICT`, `TERM_CONFLICT`, `JOIN_PATH_CONFLICT`, `RULE_CONFLICT` |
 | 4 | 기록 없음 |
-| 5 | 외부 조사 실패 (Phase 2.3) |
+| 5 | 외부 조사 실패 (`RESEARCH_FAILED`, 저장한 경험은 유지) |
 | 6 | 저장소 오류 |
 
 같은 `idempotency_key`로 같은 입력을 다시 보내면 기존 결과를 돌려주고(`reused: true`), 같은 키에 다른 입력을 보내면 충돌로 종료합니다.
