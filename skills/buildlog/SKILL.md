@@ -22,6 +22,14 @@ You do all the work. Never ask the user to write JSON, copy anything, or run a c
    - Conversation experience: the one problem the user means. Do not invent facts that are not in the conversation. Source `locator`: "{{HOST_NAME}} conversation, <date>, <project folder>, <which part>".
    - Material: read every file the user points to yourself. Decide which tables, terms, relations, join paths and rules the material actually supports.
    - A general setup or tooling problem gets an `experience` page only. Do not add terms, join paths or rules just because the format allows them.
+   - Then, before writing anything, connect it to what is already stored:
+   a. **Look up existing records** with a Search (below): the problem's error codes, tool names and key words. Read the top results. Decide one of:
+      `already_recorded` (same problem, same conclusion, nothing new: do not save; tell the user the ID),
+      `update` (same problem, new result: update that page with `id` + `expected_version`, including `summary_md` when the conclusion changes),
+      `follow_up` (a retry, a different cause, or a correction: new page plus a relation to the earlier one — `SUPERSEDES` when it replaces the earlier conclusion, otherwise `RELATED_TO`; set the earlier page's `status` to `superseded` only when it is no longer right),
+      `new`. Record the lookup and decision in the plan's `prior_check`. Never claim you checked records you did not read.
+   b. **Concepts and methods**: name the one to three concepts or methods a reader needs to reuse this (e.g. "headless CLI result checking", "TLS-inspecting proxy"). Search for existing `concept` / `method` pages and relate the experience to them (`USES`, `DERIVED_FROM`, `SUPPORTS`). Create such a page only when none exists and it explains something the experience itself does not; never one page per term.
+   c. **Table of contents**: if the lookup shows an `index` page the record belongs to, add the record with `index_members` and update that index page's `summary_md` (with `id` + `expected_version`) so it mentions the new record. Change no other index.
 2. Write the save plan as a UTF-8 JSON file. Follow [plan-format.md](plan-format.md). `idempotency_key`: `{{KEY_PREFIX}}:<YYYY-MM-DD>:<short-kebab-slug>`.
    - Pass files as `path` sources; Buildlog reads them, keeps their text, and parses DDL / schema JSON / samples itself.
    - Every non-inferred evidence `excerpt` must be copied exactly from its source text (whitespace may differ). Buildlog rejects excerpts it cannot find. Your own reasoning is evidence with `evidence_kind: "inferred"`.

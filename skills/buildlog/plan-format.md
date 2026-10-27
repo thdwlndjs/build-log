@@ -152,3 +152,14 @@ Update only the fields that changed, including the summary when the body changes
 ```
 
 Each sample becomes its own sample source (`<ref>#samples[i]`) and follows the same rules as `sample_csv` / `sample_json`: first 50 rows kept, credential-like columns redacted, checked against the table. The rows are not kept again inside the schema source. A truncated sample, an unknown table or column, or an unread field makes that source `partial`, and the save result `status` becomes `partial`.
+
+## prior_check
+
+```json
+{"query": "agy --print SUCCESS 결과 비어 있음", "terms": ["agy", "print timeout", "denied_actions"],
+ "candidates": ["<page id read before saving>"], "decision": "follow_up", "reason": "same tool, new cause: redirect links and paraphrased quotes"}
+```
+
+- What was looked up before saving and what was decided. `decision`: `new`, `update` (a candidate page is updated in this plan), `follow_up` (a new page is related to a candidate), `already_recorded` (nothing new to save).
+- `candidates`: the page IDs actually read. They must exist; merged IDs lead to their representative. The ingest result repeats the check under `prior_check`.
+- Without it, saving a new experience page gives a warning. A decision the plan does not carry out (e.g. `update` with no page update) also gives a warning.
