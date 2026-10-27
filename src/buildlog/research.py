@@ -259,24 +259,33 @@ def _store_findings(c: Any, request: dict[str, Any], findings: list[dict[str, An
     evidence_ids = []
     ts = db.now()
     for finding in findings:
+        check = finding.get("verification") or {}
+        address = check.get("final_url") or finding["url"]
         exists = c.execute(
             """SELECT 1 FROM page_sources ps JOIN evidence e ON e.id = ps.evidence_id JOIN sources s ON s.id = e.source_id
                WHERE ps.page_id = ? AND s.kind = 'web' AND s.locator = ? AND e.excerpt = ?""",
-            (request["page_id"], finding["url"], finding["quote"]),
+            (request["page_id"], address, finding["quote"]),
         ).fetchone()
         if exists:
             continue
         source_id, evidence_id = str(uuid.uuid4()), str(uuid.uuid4())
         metadata = {"title": finding["title"], "access": finding["access"], "relevance": finding["relevance"],
                     "question": request["question"], "research_request_id": request["id"], "agy_conversation_id": conversation_id,
-                    "redirect_url": finding.get("redirect_url", False)}
+                    "original_url": finding["url"], "redirect_url": address != finding["url"] or finding.get("redirect_url", False)}
+        if check:
+            metadata["verification"] = check
         c.execute("""INSERT INTO sources(id, kind, locator, captured_at, accessible_excerpt, metadata_json, parse_status)
                      VALUES (?, 'web', ?, ?, ?, ?, ?)""",
-                  (source_id, finding["url"], ts, finding["quote"][:500], to_json(metadata), finding["access"]))
-        # Only a page the researcher actually opened counts as observed; snippets and memory are second-hand.
-        kind = "observed" if finding["access"] == "fetched" else "reported"
+                  (source_id, address, ts, finding["quote"][:500], to_json(metadata), finding["access"]))
+        # Observed only when Buildlog itself found the quote verbatim in the page. A researcher's claim
+        # alone, a snippet, or a paraphrase stays second-hand.
+        kind = "observed" if check.get("match") == "exact" else "reported"
         locator = f"agy 조사 · {ACCESS_LABELS[finding['access']]} · {finding['title']}"
-        if finding.get("redirect_url"):
+        if check.get("match"):
+            from .sources import MATCH_LABELS
+
+            locator += f" · Buildlog 원문 대조: {MATCH_LABELS[check['match']]}"
+        elif metadata["redirect_url"]:
             locator += " · 검색 리디렉션 링크(원문 주소 아님)"
         if finding["relevance"]:
             locator += f" — {finding['relevance']}"
@@ -328,6 +337,13 @@ def run_research(store: Path, run_id: str | None = None, page_id: str | None = N
             results.append({"id": request["id"], "page_id": request["page_id"], "question": request["question"], "status": "failed",
                             "error_kind": error.kind, "error": str(error)[:500], "hint": ERROR_HINTS[error.kind]})
             continue
+        # Check every finding against its page before writing (network work stays outside the transaction).
+        if os.environ.get("BUILDLOG_OFFLINE") != "1":
+            from .sources import verify_finding
+
+            cache: dict[str, Any] = {}
+            for finding in findings:
+                finding["verification"] = verify_finding(finding["url"], finding["quote"], cache=cache)
         with db.write(store) as c:
             evidence_ids = _store_findings(c, request, findings, notes, conversation_id)
             result = {"findings": findings, "notes": notes, "evidence_ids": evidence_ids, "warnings": warnings}
@@ -358,8 +374,16 @@ def render_research(summary: dict[str, Any]) -> str:
         else:
             lines.append(f"- 새로 연결한 근거: {r['new_evidence']}건")
             for f in r["findings"]:
-                link = " · 검색 리디렉션 링크(원문 주소 아님)" if f.get("redirect_url") else ""
-                lines.append(f"- [{f['title']}]({f['url']}) · {ACCESS_LABELS[f['access']]}{link}: \"{f['quote']}\" — {f['relevance']}")
+                check = f.get("verification") or {}
+                if check.get("match"):
+                    from .sources import MATCH_LABELS
+
+                    url = check.get("final_url") or f["url"]
+                    note = f" · 원문 대조: {MATCH_LABELS[check['match']]}"
+                else:
+                    url = f["url"]
+                    note = " · 검색 리디렉션 링크(원문 주소 아님)" if f.get("redirect_url") else ""
+                lines.append(f"- [{f['title']}]({url}) · {ACCESS_LABELS[f['access']]}{note}: \"{f['quote']}\" — {f['relevance']}")
             if r["notes"]:
                 lines.append(f"- 조사 메모: {r['notes']}")
             for w in r["warnings"]:

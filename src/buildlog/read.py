@@ -24,14 +24,14 @@ def _rows(c: sqlite3.Connection, sql: str, args: tuple[Any, ...]) -> list[dict[s
 
 def _page_evidence(c: sqlite3.Connection, page_id: str) -> list[dict[str, Any]]:
     return _rows(c, """SELECT s.kind, s.locator, e.id AS evidence_id, e.section_locator, e.excerpt, e.evidence_kind,
-                              e.start_line, e.end_line
+                              e.start_line, e.end_line, s.metadata_json AS source_meta
                        FROM page_sources ps JOIN evidence e ON e.id = ps.evidence_id JOIN sources s ON s.id = e.source_id
                        WHERE ps.page_id = ? ORDER BY e.rowid""", (page_id,))
 
 
 def _object_evidence(c: sqlite3.Connection, object_type: str, object_id: str) -> list[dict[str, Any]]:
     return _rows(c, """SELECT s.kind, s.locator, e.id AS evidence_id, e.section_locator, e.excerpt, e.evidence_kind,
-                              e.start_line, e.end_line
+                              e.start_line, e.end_line, s.metadata_json AS source_meta
                        FROM object_evidence oe JOIN evidence e ON e.id = oe.evidence_id JOIN sources s ON s.id = e.source_id
                        WHERE oe.object_type = ? AND oe.object_id = ? ORDER BY e.rowid""", (object_type, object_id))
 
@@ -142,6 +142,22 @@ def read_page(store: Path, page_id: str) -> dict[str, Any]:
 def _excerpt(text: str, limit: int = 240) -> str:
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[:limit] + " …"
+
+
+def _verification_lines(e: dict[str, Any]) -> list[str]:
+    """For web evidence: what Buildlog found when it compared the quote with the page itself."""
+    meta = json.loads(e.get("source_meta") or "{}")
+    check = meta.get("verification")
+    if not check:
+        return []
+    from .sources import MATCH_LABELS
+
+    text = f"  - 원문 대조: {MATCH_LABELS.get(check['match'], check['match'])}"
+    if check["match"] in ("partial", "absent"):
+        text += f" (단어 일치 {int(check.get('coverage', 0) * 100)}%)"
+    if check.get("error"):
+        text += f" · {check['error']}"
+    return [text, f"  - 확인 시각: {check.get('checked_at', '')}"]
 
 
 def _evidence_lines(evidence: list[dict[str, Any]], indent: str = "  ") -> list[str]:
@@ -318,6 +334,7 @@ def _render_page(record: dict[str, Any], include_rules: bool = True) -> list[str
             line for e in record["evidence"] for line in (
                 "", f"- Source: {e['kind']} — {e['locator']}", f"  - Location: {e['section_locator']}",
                 f"  - Kind: {e['evidence_kind']}", f"  - Excerpt: {_excerpt(e['excerpt'], 600)}",
+                *_verification_lines(e),
             )
         ])
     for section in sections:

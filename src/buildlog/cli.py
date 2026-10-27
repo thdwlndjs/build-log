@@ -145,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     backup_parser.add_argument("--force", action="store_true")
     restore_parser = commands.add_parser("restore", help="replace the store with a backup (the current store is saved first)")
     restore_parser.add_argument("--from", dest="source", required=True)
+    verify_parser = commands.add_parser("verify-sources", help="resolve web evidence to the real page and check its quotes")
+    verify_target = verify_parser.add_mutually_exclusive_group(required=True)
+    verify_target.add_argument("--page", dest="page_id")
+    verify_target.add_argument("--all", action="store_true")
     merge_parser = commands.add_parser("merge", help="merge duplicate pages into one representative page")
     merge_parser.add_argument("target_id")
     merge_parser.add_argument("source_ids", nargs="+")
@@ -277,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 data = portability.restore(store, Path(args.source).expanduser())
             warnings = []
+        elif args.command == "verify-sources":
+            from .sources import verify_sources
+
+            data, warnings = verify_sources(store, args.page_id, args.all), []
         elif args.command == "merge":
             from .update import merge_pages
 

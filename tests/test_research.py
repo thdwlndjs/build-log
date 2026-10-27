@@ -44,6 +44,7 @@ class ResearchTests(unittest.TestCase):
         self.log = self.dir / "agy.log"
         os.environ["FAKE_AGY_MODE_FILE"] = str(self.mode_file)
         os.environ["FAKE_AGY_LOG"] = str(self.log)
+        os.environ["BUILDLOG_OFFLINE"] = "1"  # source checks are tested with a fake fetcher in test_sources
         self.saved = ingest(self.store, plan_with_research())
         self.page_id = self.saved["page_id"]
         self.run_id = self.saved["run_id"]
@@ -51,6 +52,7 @@ class ResearchTests(unittest.TestCase):
     def tearDown(self) -> None:
         os.environ.pop("FAKE_AGY_MODE_FILE", None)
         os.environ.pop("FAKE_AGY_LOG", None)
+        os.environ.pop("BUILDLOG_OFFLINE", None)
         self.temp_dir.cleanup()
 
     def mode(self, value: str) -> None:
@@ -78,8 +80,9 @@ class ResearchTests(unittest.TestCase):
         with closing(sqlite3.connect(self.store)) as c:
             kinds = {r[0]: r[1] for r in c.execute(
                 """SELECT e.excerpt, e.evidence_kind FROM evidence e JOIN sources s ON s.id = e.source_id WHERE s.kind = 'web'""")}
-        # A search snippet is second-hand; only a fetched page counts as observed.
-        self.assertEqual(sorted(kinds.values()), ["observed", "reported"])
+        # Only a quote Buildlog itself found verbatim in the page counts as observed. Source checks are
+        # off in this offline test, so even the finding agy calls "fetched" stays second-hand.
+        self.assertEqual(sorted(kinds.values()), ["reported", "reported"])
         self.assertEqual(self.one("SELECT research_status FROM runs WHERE id = ?", self.run_id)[0], "succeeded")
         md = render_markdown(read_object(self.store, self.page_id))
         self.assertIn("web — https://www.sqlite.org/fts5.html", md)
@@ -188,7 +191,7 @@ class ResearchCliTests(unittest.TestCase):
             saved = ingest(store, plan_with_research())
             mode = Path(d) / "mode.txt"
             mode.write_text("denied", encoding="utf-8")
-            env = {**os.environ, "PYTHONPATH": str(SRC), "FAKE_AGY_MODE_FILE": str(mode), "BUILDLOG_AGY_COMMAND": json.dumps(FAKE)}
+            env = {**os.environ, "PYTHONPATH": str(SRC), "FAKE_AGY_MODE_FILE": str(mode), "BUILDLOG_AGY_COMMAND": json.dumps(FAKE), "BUILDLOG_OFFLINE": "1"}
             done = subprocess.run([sys.executable, "-m", "buildlog", "--store", str(store), "research", "--run", saved["run_id"],
                                    "--timeout", "30"], capture_output=True, env=env)
             self.assertEqual(done.returncode, 5, done.stderr.decode("utf-8", "replace"))
@@ -207,7 +210,7 @@ class CompatibilityTests(unittest.TestCase):
         from test_knowledge import demo_plan
 
         plan, digest = normalize_plan(demo_plan())
-        expected = db.sha256({k: v for k, v in plan.items() if k not in {"warnings", "research"}})
+        expected = db.sha256({k: v for k, v in plan.items() if k not in {"warnings", "research", "prior_check"}})
         self.assertEqual(digest, expected)
 
 
