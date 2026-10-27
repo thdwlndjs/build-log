@@ -54,6 +54,8 @@ SQLite가 기준 원본이다. Markdown 본문은 DB의 TEXT로 보관하고 `.m
 
 관계는 USES, DEPENDS_ON, SUPPORTS, TESTED_BY, DERIVED_FROM, SUPERSEDES, CONTRADICTS, RELATED_TO, PART_OF, JOINS_TO를 사용한다. JOINS_TO는 연결 가능성이며 인과관계가 아니다. 일반 그래프의 순환은 허용하되 목차 계층의 순환은 거부한다.
 
+묶음 소속(2026-10-27 추가): 모든 문서는 상위 묶음에 속한다. 묶음은 index 페이지와 index_members다. 부모 목차가 없는 index 페이지가 최상위 묶음이며 그 자체는 소속이 없어도 된다. 그 밖의 index·experience·concept·method·source·schema_table 페이지는 하나 이상의 index에 속해야 한다. schema_column은 PART_OF 관계로 테이블에 속하는 것으로 소속을 인정한다. 병합으로 대체된 페이지는 대상에서 빠진다(소속은 대표 페이지로 옮겨진다). 어느 목차에 넣을지는 호스트가 판단하며 Buildlog는 자동 분류하지 않는다.
+
 ## 4. 인제스트 입력
 
 입력은 current_conversation, markdown, text, sql_ddl, schema_json, sample_json/csv다. 대화·문서 의미 해석은 호스트가 수행하고 백엔드에는 구조화된 저장 계획을 전달한다. DDL은 방언을 명시하며 해석할 수 없는 구문은 원문과 진단을 남긴다. 일부만 해석하고 전체 분석에 성공한 것으로 처리하지 않는다.
@@ -108,6 +110,8 @@ rule kind는 prohibition, requirement, unsupported_operation이다. 각각 적�
 
 기존 의미·환경과 다르면 무조건 덮어쓰지 않고 새 기록과 관계를 만든다. 기존 경험의 후속 결과라면 해당 버전을 갱신한다. 호스트가 본문과 직접 영향을 받은 요약을 준비하고, DB 서비스가 전체 계획을 검증한 후 원자적으로 반영한다. 실패 시 부분 저장을 노출하지 않는다.
 
+묶음 소속 검사(§3): 저장 계획을 적용한 결과에서, 이번 저장으로 새로 생긴 페이지 중 소속 대상(index는 부모가 없으면 최상위 묶음으로 허용, schema_column 제외)이 어느 index에도 속하지 않으면 저장 전체를 거부한다(입력 오류, 종료 코드 2). 스키마 출처가 자동으로 만든 테이블 페이지도 대상이다. 메시지는 `BUNDLE_REQUIRED`와 소속 없는 페이지의 제목·ID를 담는다. 이번 저장이 갱신한 기존 페이지(`id`+`expected_version`)가 소속이 없으면 저장은 진행하고 `BUNDLE_MISSING` 경고를 남긴다. 기존 누락 문서는 별도 저장 계획(목차 구성원 추가와 목차 요약 갱신)으로 정리한다.
+
 조사 실패는 경험 자체를 소실시키지 않는다. 사용 가능한 증거로 저장하고 research_status를 failed/pending으로 남기며 재개 시 해당 실행에 결과를 추가한다. 원문·샘플의 자격증명은 저장 계획에서 제거한다.
 
 ## 7. 조회·경로 탐색
@@ -153,21 +157,89 @@ JSON envelope는 schema_version, request_id, status, data, warnings, error를 �
 
 로컬 웹 화면은 127.0.0.1에 바인딩한다. 그래프 렌더러와 Markdown 렌더러를 자산으로 번들링해 외부 CDN이 없어도 열리게 한다. 생성 화면에 독자적인 데이터 복사본을 저장하지 않는다.
 
-| API | 기능 |
-| --- | --- |
-| GET /api/graph | 최근 실행 또는 검색 결과 주변 그래프. cursor와 cap 제공 |
-| GET /api/pages/{id} | 본문·용어·출처·규칙·버전 |
-| GET /api/relations/{id} | 방향·의미·근거 |
-| GET /api/paths | 조인 경로·조건·주의점 |
-| PATCH /api/pages/{id} | expected_version 기반 수정 |
-| PATCH /api/relations/{id} | 관계·설명 수정 |
-| PATCH /api/terms/{id} | 정의·맥락·별칭 수정 |
-| PATCH /api/rules/{id} | 금칙·조건·미지원 연산 수정 |
-| PATCH /api/paths/{id} | 조인 경로·조건·주의점 수정 |
-| POST /api/feedback | 수정 지적 기록 |
-| POST /api/merge | 버전 확인 후 중복 병합 |
+### 10.1 API
 
-페이지/관계/규칙/경로의 수정은 동일한 버전 정책을 따른다. 연결 해제는 soft-delete와 이력 보존으로 처리한다. 초기 graph 응답 cap은 150 nodes/300 edges, 상한 500/1,000으로 두고 초과분은 펼치기로 접근한다. 노드 클릭으로 본문, 연결선 클릭으로 설명을 읽고 수정한다. 조인 경로 선택 시 해당 테이블·연결을 강조한다.
+| API | 기능 | 구현 |
+| --- | --- | --- |
+| GET /api/health | 서버·저장소 확인 | Phase 3 |
+| GET /api/graph | 최근 실행(`run`)·주변(`focus`)·검색(`q`) 그래프. `types`, `columns`, `cap_nodes`, `cap_edges`. 응답은 생략한 노드·연결 수(`truncated`)를 담는다. cursor는 제공하지 않는다 | Phase 3 |
+| GET /api/graph?mode=all | 저장소 전체를 최근 수정 순으로 표시 한도까지. 병합으로 대체된 페이지 제외, 컬럼은 `columns=1`일 때만 | Phase 5 |
+| GET /api/objects/{id} | 페이지·관계·용어·규칙·조인 경로의 상세(레코드, 렌더된 Markdown, 이력 20건, 피드백, 병합 내역) | Phase 3 |
+| GET /api/pages/{id}, /relations/{id}, /terms/{id}, /rules/{id}, /paths/{id} | `/api/objects/{id}`와 같고 유형이 다르면 404 | Phase 3 |
+| GET /api/search | `query`와 같은 검색(`q`, `scope`) | Phase 3 |
+| GET /api/paths | 조인 경로·조건·주의점(`system`, `from`, `to`, `purpose`) | Phase 3 |
+| GET /api/runs | 저장 실행 목록 | Phase 3 |
+| GET /api/pages | 문서 목록. 10.3 | Phase 5 |
+| GET /api/sessions, /api/sessions/{id} | 묶음(목차) 목록과 상세. 10.3 | Phase 5 |
+| GET /api/sources, /api/sources/{id} | 저장된 출처 목록과 원문·연결 문서. 10.3 | Phase 5 |
+| GET /api/settings | 설정 읽기 전용. 10.3 | Phase 5 |
+| PATCH /api/pages/{id} | 제목·요약·본문·상태 수정(expected_version) | Phase 3 |
+| PATCH /api/relations/{id} | 종류·설명·상태·방향 수정 | Phase 3 |
+| PATCH /api/terms/{id} | 정의·맥락·별칭·상태 수정 | Phase 3 |
+| PATCH /api/rules/{id} | 금칙·조건·미지원 연산 수정 | Phase 3 |
+| PATCH /api/paths/{id} | 조인 경로·조건·주의점 수정 | Phase 3 |
+| POST /api/relations/{id}/unlink | 연결 해제(soft-delete, 이력 보존) | Phase 3 |
+| POST /api/feedback, /api/feedback/{id}/status | 수정 지적 기록과 상태 변경 | Phase 3 |
+| POST /api/merge | 버전 확인 후 중복 병합 | Phase 3 |
+
+페이지/관계/규칙/경로의 수정은 동일한 버전 정책을 따른다. 연결 해제는 soft-delete와 이력 보존으로 처리한다. 초기 graph 응답 cap은 150 nodes/300 edges, 상한 500/1,000으로 두고 초과분은 주변 그래프로 접근한다. 조인 경로 선택 시 해당 테이블·연결을 강조한다. Phase 5에서 추가하는 API는 모두 조회 전용이며 데이터를 바꾸지 않는다.
+
+### 10.2 화면
+
+`/`는 작업 공간 화면(Phase 5)이다. 배치와 탭 구성은 사용자가 승인한 기준 화면 `reperence/buildlog-workbench.html`을 그대로 따르고, 예시 데이터 대신 저장소 데이터를 표시한다. 기준 화면에 없는 탭·패널·메뉴를 추가하지 않는다.
+
+| 영역 | 내용 | 데이터 |
+| --- | --- | --- |
+| 제목줄 | 전체 문서·검색·설정 | - |
+| 탐색기 › 세션 | 최상위 묶음과 그 아래 문서(목차 자신 + 구성원 순서대로), 목록 필터 | `/api/sessions` |
+| 탐색기 › 소스 | 저장된 출처 목록, 목록 필터 | `/api/sources` |
+| 탭 줄 | 열린 탭, 전체 그래프 진입, 탭 닫기 | - |
+| 도구줄 | 탐색기 접기, 위치 표시, 본문 수정(저장·취소), 속성 접기 | - |
+| 문서 탭 | 유형·제목·요약·본문 Markdown·관련 문서(관계 상대, 목차 부모·자식). 오른쪽: 주변 연결(로컬 그래프, 1단계 이웃)과 정보·이력·근거 | `/api/objects/{id}`, `/api/graph?focus=` |
+| 세션 탭 | 묶음 제목·요약, 연결된 지식, 소스. 오른쪽: 속성 | `/api/sessions/{id}` |
+| 소스 탭 | 원문(없으면 저장된 발췌와 근거 인용), 이 소스와 연결된 지식. 오른쪽: 속성 | `/api/sources/{id}` |
+| 전체 문서 탭 | 유형 필터 전체·경험·개념·방법·테이블·목차 | `/api/pages` |
+| 전체 그래프 탭 | 전체 그래프. 오른쪽: 선택한 노드와 문서 열기 | `/api/graph?mode=all` |
+| 설정 탭 | 저장소·agy 경로와 출처, 설정 파일 위치, 스키마 버전(읽기 전용) | `/api/settings` |
+| 검색 | 대화상자. 결과에서 문서 열기 | `/api/search` |
+| 상태줄 | 현재 화면 정보, 완료·오류 메시지, 소속 없는 문서 경고 | - |
+
+- 본문 수정은 `PATCH /api/pages/{id}`로 `body_md`만 바꾼다. 미리보기는 두지 않는다. 버전 충돌은 기존처럼 거부하고 상태줄에 알린다.
+- 그래프 노드를 누르면 그 문서 탭을 열고 주변 연결을 다시 그린다.
+- 근거 탭의 출처를 누르면 소스 탭을 연다.
+- URL은 현재 탭(`?tab=doc:<id>`, `session:<id>`, `source:<id>`, `list`, `graph`, `settings`)을 담고 탭을 바꿀 때 기록을 쌓는다. 뒤로·앞으로 가기와 직접 링크는 같은 탭을 연다. `?run=<id>`는 전체 그래프 탭의 저장 실행 보기로, `?open=<id>`는 그 문서 탭으로 연다(기존 링크 호환). 열린 탭 목록은 브라우저 저장소에 두며, 저장하지 못해도 화면은 동작한다.
+- 아이콘은 사용하는 것만 자산으로 번들링한다(외부 CDN 없음).
+- 소속 없는 문서는 숨기지 않는다. 상태줄에 경고하고 전체 문서·검색으로 열 수 있다. 정리는 저장 계획으로 한다(§3, §6).
+
+기준 화면 파일의 Codex 시각화 래퍼(iframe·런타임 CSS·스크립트)와 예시 데이터는 제품 구현 요구가 아니다. 요구는 그 안의 화면 배치·탭 구성·스타일·동작이다.
+
+기준 화면에 위치가 없는 기존 기능(제목·요약·상태 수정, 관계 수정·해제, 용어·규칙·조인 경로 수정, 조인 경로 강조, 피드백, 병합, 저장 실행 선택, 컬럼 표시)은 Phase 5에서 작업 공간에 연결하지 않는다. 해당 API·서버 함수·CLI는 지우지 않고 유지한다. 기존 검토 화면을 별도 주소로 운영하지 않는다. 연결 위치는 사용자가 QA에서 정하며, 기능별 현재 동작과 이를 확인하던 기존 E2E는 docs/workbench-menu-draft.md에 남긴다.
+
+### 10.3 조회 API 계약 (Phase 5)
+
+공통: 오류는 기존 형식(`{"error", "kind"}`)과 상태 코드(입력 400, 없음 404)를 따른다. 병합으로 대체된 페이지는 목록에서 빠지고 ID로 열면 대표 페이지로 이어진다. `summary_line`은 요약의 첫 줄(최대 160자)이다.
+
+- `GET /api/pages?type&status&sort&offset&limit`
+  - `type`: 페이지 type 하나, `status`: 문서 상태 하나, `sort`: `updated`(기본, 최근 수정 순)·`title`, `offset` ≥ 0(기본 0), `limit` 1–200(기본 50). 잘못된 값은 400.
+  - `type`이 없으면 schema_column을 뺀다.
+  - 응답: `{total, offset, limit, counts: {type: 개수}, items: [{id, title, type, status, version, updated_at, summary_line, summary_dirty}]}`. `total`은 필터를 적용한 개수, `counts`는 필터와 무관한 유형별 개수.
+- `GET /api/sessions`
+  - 응답: `{sessions: [{id, title, summary_line, version, updated_at, children: [{id, title, type, position}], source_count}], unbundled: [{id, title, type}]}`.
+  - `sessions`: 부모 목차가 없는 index 페이지, 제목 순. `children`: 직속 구성원, position 순(목차 자신은 넣지 않는다).
+  - `unbundled`: §3 소속 대상 중 어느 묶음에도 속하지 않은 페이지.
+  - `source_count`: 목차 자신과 직속 구성원에 연결된 출처 수.
+- `GET /api/sessions/{id}`: index 페이지가 아니면 404. 응답: `{id, title, summary_md, version, updated_at, parents: [{id, title}], children: [{id, title, type, status, summary_line, position}], sources: [{id, kind, kind_label, title}]}`.
+- `GET /api/sources?kind&q`
+  - `kind`: 출처 종류 하나(잘못된 값 400), `q`: 제목·위치의 부분 문자열(대소문자 무시).
+  - 응답: `{sources: [{id, kind, kind_label, title, locator, captured_at, parse_status, page_count}]}`, 최근 수집 순.
+  - `title`: 웹은 페이지 제목, 파일은 파일 이름, 그 밖에는 위치(locator).
+  - `kind_label`: 대화(conversation), 웹(web), 문서(markdown·text·document), DDL(sql_ddl), 스키마(schema_json), 샘플(sample_json·sample_csv).
+- `GET /api/sources/{id}`
+  - 응답: `{id, kind, kind_label, title, locator, captured_at, parse_status, diagnostics, text, text_truncated, excerpt, evidence: [{id, excerpt, section_locator, evidence_kind}], verification, pages: [{id, title, type}]}`.
+  - `text`: 저장된 원문(저장 시 자격증명을 가린 것) 최대 200,000자, 없으면 null. 대화·웹 출처는 원문이 저장되지 않으므로 null이며 `excerpt`·`evidence`만 있다. 새로 수집하지 않는다.
+  - `verification`: 웹 출처의 원문 대조 결과, 그 밖에는 null.
+  - `pages`: 이 출처의 근거가 연결된 페이지. 페이지에 직접 연결된 근거와, 용어·규칙(소속 페이지)·관계(양 끝 페이지)·조인 경로(지나는 테이블)에 연결된 근거를 포함한다.
+- `GET /api/settings`: `{store, schema_version, config: {file, store: {value, origin}, agy: {value, origin}}}`. `store`는 서버가 쓰는 저장소 경로다. 세션 토큰과 자격증명은 담지 않는다.
 
 UI 수정 시 요약 갱신은 호스트 수정 작업으로 이어지게 한다. 호스트 없이 본문을 직접 편집하면 summary_dirty로 표시하고 검색은 최신 본문을 즉시 반영한다. 요약을 새 본문과 동기화할 때까지 오래된 요약을 최신으로 표현하지 않는다. 실제 문자열 편집은 저장 서비스를 통해 즉시 버전화한다.
 
@@ -202,6 +274,8 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 새 세션 조회 | 관련 경험과 실제 적용 조건 전달 | R11 |
 | 실제 조사 | 인증·권한·timeout·JSON 오류 및 재개 | R13 |
 | 성능 | 100/1,000/10,000페이지에서 검색·렌더링·관계 응답 측정 | R11 |
+| 묶음 소속 | 소속 없는 새 문서 저장 거부, 최상위 목차 허용, 컬럼은 테이블 소속, 기존 누락 경고 | R02·R05 |
+| 작업 공간 | 목록·검색·세션·소스에서 문서로 이동, 문서와 주변 그래프 동시 표시, 노드 선택 시 문서·그래프 갱신, 뒤로·앞으로·직접 링크, 본문 수정과 이력 | R10·R11 |
 
 실제 경험 기반 질문에는 정답 기록 ID·필수 용어·필수 규칙을 사람이 판독 가능한 fixture로 정의한다. 검색 recall과 금칙 전달 누락을 기록한다. 로컬 검색·관계·렌더링과 원격 조사 시간을 분리한다. 초기 성능 목표는 1,000페이지 데이터에서 로컬 query p95 1초 이내, 기본 graph 응답 p95 500ms 이내이며 구현 기준 PC와 30회 이상 측정 조건을 기록한다. 목표값은 달성한 실측값과 구분한다.
 
@@ -212,6 +286,7 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 3. 호스트 스킬·Antigravity 프로세스 어댑터.
 4. 그래프 검토·수정·병합·피드백 및 내보내기/가져오기.
 5. 실제 새 세션 재사용·회귀 테스트·규모 측정.
+6. 묶음 소속 검사와 작업 공간 화면(plan.md Phase 5).
 
 각 단계는 위 계약을 검증하며 최종 통합을 끝내야 MVP 완료다. 이 문서는 구현 명세이며 코드나 연동이 이미 동작한다는 의미가 아니다.
 
@@ -223,7 +298,7 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 - [Slipbox 관계](https://agentria.ai/docs/slip-link-node), [조회](https://agentria.ai/docs/slip-follow-links-node): 방향과 유형이 있는 연결.
 - `mvp.md`와 사용자 첨부 화면: 제품 범위 및 테이블·조인·금칙·미지원 연산 요구.
 
-## 16. 구현 대조 (2026-10-27, Phase 4 완료 시점)
+## 16. 구현 대조 (2026-10-27, Phase 5 착수 시점)
 
 명세의 요구는 지우지 않고 구현 상태만 표시한다. 미구현 항목은 계획된 Phase에서 구현한다.
 
@@ -256,3 +331,6 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 13 | UI 수정 검증 | 구현 | Playwright Chromium E2E 9건: 본문·관계·정의 수정이 CLI read·query에 반영, 해제·병합 후 참조·근거 보존, 버전 충돌, 피드백, 조인 경로 강조, Markdown 정화 |
 | 13 | 100/1,000/10,000페이지 성능 측정 | 구현 | 각 30회. 1,000페이지 query p95 106ms, 그래프 API p95 41ms, 10,000페이지 query p95 251ms(docs/benchmark.md) |
 | 13 | PRD R01–R13 검증 근거 | 구현 | docs/verification.md: 요구별 테스트와 실제 실행 기록 |
+| 3·6 | 모든 문서의 묶음 소속, 소속 없는 새 문서 거부(`BUNDLE_REQUIRED`), 기존 누락 경고(`BUNDLE_MISSING`) | 미구현(Phase 5) | 계약 테스트 `tests/test_bundles.py`. 2026-10-27 기준 소속 없는 문서: 실사용 3건, 데모 2건(plan.md Phase 5) |
+| 10.1·10.3 | 작업 공간용 조회 API(pages·sessions·sources·settings, graph `mode=all`) | 미구현(Phase 5) | 계약 테스트 `tests/test_browse.py` |
+| 10.2 | 작업 공간 화면 | 미구현(Phase 5) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외) |
