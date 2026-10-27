@@ -125,6 +125,11 @@ class QueryBehaviourTests(SearchCorpus):
         alias = query(self.store, "작업자 코드")
         self.assertIn("sensor_reading.operator_code", [r["title"] for r in alias["results"]])
 
+    def test_two_character_korean_words_reach_bodies(self) -> None:
+        # Trigram MATCH cannot see 2-character words; they are found in bodies by substring.
+        for word, title in (("재발", "Oracle XE 접속 실패: 리스너가 떠 있지 않음"), ("신뢰", "사내 프록시에서 pip 인증서 오류: 루트 인증서 지정으로 해결")):
+            self.assertIn(title, [r["title"] for r in query(self.store, word)["results"]], word)
+
     def test_fts_syntax_in_question_is_literal(self) -> None:
         # FTS operators and stray quotes are searched as plain text, never parsed as query syntax.
         result = query(self.store, 'NEAR("zz" yy) * "unbalanced', terms=['"quoted', "zz:yy*"])

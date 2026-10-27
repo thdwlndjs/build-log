@@ -92,9 +92,12 @@ def _candidates(c: sqlite3.Connection, terms: list[str]) -> dict[str, sqlite3.Ro
         for row in c.execute("SELECT * FROM search_index WHERE search_index MATCH ? ORDER BY bm25(search_index) LIMIT 500", (expr,)):
             rows[row["page_id"]] = row
     for term in (t for t in terms if len(t) < 3):
+        # Trigram MATCH needs 3+ characters. Many Korean nouns have two (설치, 오류, 권한), so short terms
+        # also scan bodies (about 30 ms at 10,000 pages); title and alias hits still score higher.
         pattern = _like(term)
-        for row in c.execute("SELECT * FROM search_index WHERE title LIKE ? ESCAPE '\\' OR aliases LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' LIMIT 500",
-                             (pattern, pattern, pattern)):
+        for row in c.execute("""SELECT * FROM search_index WHERE title LIKE ? ESCAPE '\\' OR aliases LIKE ? ESCAPE '\\'
+                                OR summary LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR extra LIKE ? ESCAPE '\\' LIMIT 500""",
+                             (pattern,) * 5):
             rows[row["page_id"]] = row
     normalized = {normalize_text(t) for t in terms}
     marks = ",".join("?" * len(normalized))
