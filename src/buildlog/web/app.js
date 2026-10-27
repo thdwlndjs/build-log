@@ -13,9 +13,12 @@
   const STATUS_LABEL = { draft: '초안', active: '활성', deprecated: '폐기', superseded: '대체됨' };
   const SOURCE_LABEL = { conversation: '대화', web: '웹', markdown: '문서', text: '문서', document: '문서', sql_ddl: 'DDL', schema_json: '스키마', sample_json: '샘플', sample_csv: '샘플' };
   const EVIDENCE_LABEL = { observed: '관찰', reported: '전달받음', inferred: '추론' };
+  const MATCH_LABEL = { exact: '인용 그대로 확인', partial: '일부 일치', absent: '찾지 못함', unreadable: '원문을 읽지 못함' };
+  const PARSE_LABEL = { complete: '전부 읽음', partial: '일부만 읽음' };
+  const LIST_FILTERS = [['전체', null], ['경험', 'experience'], ['개념', 'concept'], ['방법', 'method'], ['테이블', 'schema_table'], ['목차', 'index']];
   const SPECIAL = { list: '전체 문서', graph: '전체 그래프', settings: '설정' };
   // Screens that exist in the reference but are connected to the store in a later step of plan.md Phase 5.
-  const LATER = { list: '5-4', search: '5-4', session: '5-4', source: '5-4', graph: '5-5', settings: '5-5' };
+  const LATER = { graph: '5-5', settings: '5-5' };
   const TAB_RE = /^(?:(?:doc|session|source):[0-9A-Za-z-]{1,80}|list|graph|settings)$/;
   const STORAGE_KEY = `buildlog.workbench:${STORE}`;
 
@@ -30,11 +33,16 @@
   const state = {
     tabs: [], active: null, left: true, context: true,
     navigator: 'sessions', editing: false, draft: null, editVersion: null,
-    info: '정보', searching: false, run: null,
+    info: '정보', searching: false, query: '', run: null,
+    filter: '', collapsed: new Set(),
   };
   const details = new Map();   // object id -> /api/objects detail
-  const failures = new Map();  // object id -> error message
+  const failures = new Map();  // object id (or session / source id) -> error message
   const graphs = new Map();    // page id -> /api/graph?focus= data
+  const sessions = new Map();  // index page id -> /api/sessions/{id}
+  const sources = new Map();   // source id -> /api/sources/{id}
+  const lists = { sessions: null, unbundled: [], sources: null };   // explorer lists
+  const listView = { type: null, items: [], total: 0, loaded: false, loading: false };   // 전체 문서
   let message = null;          // {text, kind}; cleared on navigation
   let localCy = null;
 
@@ -183,7 +191,11 @@
     if (push && !same) history.pushState({ tab: id }, '', urlFor(id));
     savePrefs();
     render();
-    if (screenOf(id) === 'document') await loadDocument(objectOf(id));
+    const screen = screenOf(id);
+    if (screen === 'document') await loadDocument(objectOf(id));
+    else if (screen === 'session') await loadSession(objectOf(id));
+    else if (screen === 'source') await loadSource(objectOf(id));
+    else if (screen === 'list' && !listView.loaded) await loadList(listView.type);
   }
 
   function closeTab(id) {
@@ -242,6 +254,63 @@
     if (state.active === `doc:${pageId}`) drawLocalGraph();
   }
 
+  async function loadSession(id) {
+    try {
+      if (!sessions.has(id)) sessions.set(id, await api('GET', `/api/sessions/${encodeURIComponent(id)}`));
+      failures.delete(id);
+      setTabTitle(`session:${id}`, sessions.get(id).title);
+    } catch (error) {
+      failures.set(id, error.status === 404 ? '이 세션(목차)을 찾을 수 없습니다. 탭을 닫아 주세요.' : error.message);
+      report(error);
+    }
+    if (state.active === `session:${id}`) render();
+  }
+
+  async function loadSource(id) {
+    try {
+      if (!sources.has(id)) sources.set(id, await api('GET', `/api/sources/${encodeURIComponent(id)}`));
+      failures.delete(id);
+      setTabTitle(`source:${id}`, sources.get(id).title);
+    } catch (error) {
+      failures.set(id, error.status === 404 ? '이 소스를 찾을 수 없습니다. 탭을 닫아 주세요.' : error.message);
+      report(error);
+    }
+    if (state.active === `source:${id}`) render();
+  }
+
+  async function loadLists() {
+    try {
+      const [bundles, stored] = await Promise.all([api('GET', '/api/sessions'), api('GET', '/api/sources')]);
+      lists.sessions = bundles.sessions;
+      lists.unbundled = bundles.unbundled;
+      lists.sources = stored.sources;
+    } catch (error) {
+      report(error);
+    }
+    refreshTree();
+    updateStatus();
+  }
+
+  async function loadList(type, { more = false } = {}) {
+    listView.loading = true;
+    if (!more) { listView.type = type; listView.items = []; }
+    if (state.active === 'list') render();
+    try {
+      const params = new URLSearchParams({ offset: String(listView.items.length), limit: '50' });
+      if (type) params.set('type', type);
+      const data = await api('GET', `/api/pages?${params}`);
+      if (listView.type !== type) return;   // another filter was chosen meanwhile
+      listView.items = listView.items.concat(data.items);
+      listView.total = data.total;
+      listView.loaded = true;
+    } catch (error) {
+      report(error);
+    } finally {
+      listView.loading = false;
+    }
+    if (state.active === 'list') render();
+  }
+
   function currentDetail() {
     return screenOf(state.active) === 'document' ? details.get(objectOf(state.active)) || null : null;
   }
@@ -288,15 +357,61 @@
     side.hidden = !state.left;
     app.classList.toggle('hide-left', !state.left);
     const nav = (key, label) => el('button', { type: 'button', class: state.navigator === key ? 'active' : '', 'data-navigator': key,
-      onclick: () => { state.navigator = key; sidebar(); } }, label);
-    const label = state.navigator === 'sessions' ? '세션' : '소스';
+      onclick: () => { state.navigator = key; state.filter = ''; sidebar(); } }, label);
+    const filter = el('input', { 'data-navigator-filter': true, 'aria-label': '탐색 항목 필터', placeholder: '목록에서 찾기' });
+    filter.value = state.filter;
+    // Only the tree is redrawn while typing, so the field keeps its focus.
+    filter.addEventListener('input', () => { state.filter = filter.value; refreshTree(); });
     side.replaceChildren(
       el('div', { class: 'l-pane-title' }, '탐색기'),
       el('div', { class: 'l-navtabs', 'aria-label': '탐색 대상' }, nav('sessions', '세션'), nav('sources', '소스')),
-      el('div', { class: 'l-navfilter' }, el('input', { 'data-navigator-filter': true, 'aria-label': '탐색 항목 필터', placeholder: '목록에서 찾기', disabled: true })),
-      el('div', { class: 'l-tree-body' }, el('p', { class: 'w-muted' }, `${label} 목록은 Phase ${LATER.session}에서 저장소와 연결합니다.`)),
-      el('div', { class: 'l-nav-footer' }, state.navigator === 'sessions' ? '목차 묶음' : '저장된 출처'),
+      el('div', { class: 'l-navfilter' }, filter),
+      el('div', { class: 'l-tree-body' }),
+      el('div', { class: 'l-nav-footer' }),
     );
+    refreshTree();
+  }
+
+  function refreshTree() {
+    const body = $('.l-tree-body', side);
+    const footer = $('.l-nav-footer', side);
+    if (!body) return;
+    const q = state.filter.trim().toLowerCase();
+    const has = text => !q || String(text || '').toLowerCase().includes(q);
+    if (state.navigator === 'sessions') {
+      if (!lists.sessions) { body.replaceChildren(el('p', { class: 'w-muted' }, '불러오는 중입니다.')); footer.textContent = '목차 묶음'; return; }
+      const shown = lists.sessions.filter(s => has(s.title) || s.children.some(c => has(c.title)));
+      body.replaceChildren(...shown.map(sessionGroup));
+      if (!shown.length) body.append(el('p', { class: 'w-muted' }, lists.sessions.length ? '맞는 세션이 없습니다.' : '목차 묶음이 없습니다.'));
+      footer.textContent = `목차 묶음 ${lists.sessions.length}개${lists.unbundled.length ? ` · 목차에 없는 문서 ${lists.unbundled.length}건` : ''}`;
+    } else {
+      if (!lists.sources) { body.replaceChildren(el('p', { class: 'w-muted' }, '불러오는 중입니다.')); footer.textContent = '저장된 출처'; return; }
+      const shown = lists.sources.filter(s => has(s.title) || has(s.kind_label));
+      body.replaceChildren(...shown.map(s => el('button', { type: 'button', class: `l-source${state.active === `source:${s.id}` ? ' selected' : ''}`,
+        'data-source': s.id, onclick: () => openKnown(`source:${s.id}`, s.title) },
+        icon(s.kind === 'conversation' ? 'message-square' : 'file-text'), el('span', {}, s.title, el('small', {}, s.kind_label)))));
+      if (!shown.length) body.append(el('p', { class: 'w-muted' }, lists.sources.length ? '맞는 소스가 없습니다.' : '저장된 소스가 없습니다.'));
+      footer.textContent = `저장된 출처 ${lists.sources.length}개`;
+    }
+  }
+
+  function sessionGroup(s) {
+    const open = !state.collapsed.has(s.id);
+    // As in the reference, the index page itself is the first document of its session.
+    const docs = [{ id: s.id, title: s.title }, ...s.children];
+    return el('div', { class: 'w-group' },
+      el('button', { type: 'button', class: 'w-fold', 'data-fold': s.id, 'aria-label': `${s.title} 펼치기 또는 접기`, 'aria-expanded': String(open),
+        onclick: () => { if (open) state.collapsed.add(s.id); else state.collapsed.delete(s.id); refreshTree(); } }, open ? '−' : '+'),
+      el('button', { type: 'button', 'data-session': s.id, class: state.active === `session:${s.id}` ? 'selected' : '',
+        onclick: () => openKnown(`session:${s.id}`, s.title) }, icon('messages-square'), s.title),
+      open ? el('div', { class: 'w-child-list' }, docs.map(d => el('button', { type: 'button', 'data-open': d.id,
+        class: state.active === `doc:${d.id}` ? 'selected' : '', title: d.title, onclick: () => openTab(`doc:${d.id}`) }, icon('file-text'), d.title))) : null);
+  }
+
+  // Open a tab whose title is already known, so the tab strip shows it before the detail arrives.
+  function openKnown(id, title) {
+    if (!state.tabs.some(t => t.id === id)) state.tabs.push({ id, title });
+    openTab(id);
   }
 
   function tabstrip() {
@@ -313,7 +428,7 @@
     const label = {
       document: `문서 / ${detail ? titleOf(detail) : '불러오는 중'}`,
       graph: '그래프 / 전체 지식', list: '전체 문서', settings: '설정',
-      session: `세션 / ${tab ? tabTitle(tab) : ''}`, source: `소스 / ${tab ? tabTitle(tab) : ''}`,
+      session: `세션 / ${tab ? tabTitle(tab) : ''}`, source: `소스 / ${tab ? tabTitle(tab) : ''}`,   // the reference's labels
     }[screen] || '작업 영역';
     const actions = [];
     if (detail && detail.object_type === 'page') {
@@ -341,9 +456,78 @@
       if (failures.has(id)) return el('div', { class: 'w-empty' }, failures.get(id));
       return el('div', { class: 'w-empty' }, '불러오는 중입니다.');
     }
+    if (screen === 'session' || screen === 'source') {
+      const id = objectOf(state.active);
+      const found = (screen === 'session' ? sessions : sources).get(id);
+      if (found) return screen === 'session' ? sessionPaper(found) : sourcePaper(found);
+      return el('div', { class: 'w-empty' }, failures.get(id) || '불러오는 중입니다.');
+    }
+    if (screen === 'list') return documentList();
     if (screen === 'empty') return el('div', { class: 'w-empty' }, '왼쪽에서 문서나 소스를 선택하세요.');
-    const title = { list: '전체 문서', graph: '전체 그래프', settings: '설정', session: '세션', source: '소스' }[screen];
+    const title = { graph: '전체 그래프', settings: '설정' }[screen];
     return el('div', { class: 'w-empty' }, el('h1', {}, title), el('p', {}, `이 화면은 Phase ${LATER[screen]}에서 저장소 데이터와 연결합니다.`));
+  }
+
+  const docRow = d => el('button', { type: 'button', class: 'w-row', 'data-open': d.id, onclick: () => openTab(`doc:${d.id}`) },
+    el('strong', {}, d.title), el('span', {}, [TYPE_LABEL[d.type] || d.type, d.summary_line].filter(Boolean).join(' · ')));
+
+  function sessionDocs(s) {
+    return [{ id: s.id, title: s.title, type: 'index', summary_line: (s.summary_md || '').split('\n').find(l => l.trim()) || '' }, ...s.children];
+  }
+
+  function sessionPaper(s) {
+    return el('article', { class: 'w-paper' },
+      el('div', { class: 'w-kind' }, s.parents.length ? '세션 · 하위 목차' : '세션 · 목차 묶음'),
+      el('h1', { id: 'session-title' }, s.title),
+      el('p', { class: 'w-summary' }, s.summary_md),
+      el('h2', {}, '연결된 지식'), sessionDocs(s).map(docRow),
+      el('h2', {}, '소스'),
+      s.sources.length
+        ? s.sources.map(src => el('button', { type: 'button', class: 'w-inline-link', 'data-source': src.id, onclick: () => openKnown(`source:${src.id}`, src.title) },
+          `${src.kind_label} · ${src.title} →`))
+        : el('p', { class: 'w-muted' }, '연결된 소스가 없습니다.'));
+  }
+
+  function sourcePaper(src) {
+    const parts = [el('div', { class: 'w-kind' }, `소스 / ${src.kind_label}`), el('h1', { id: 'source-title' }, src.title)];
+    if (src.kind === 'web') {
+      parts.push(el('p', { class: 'w-summary' }, el('a', { href: src.locator, target: '_blank', rel: 'noopener noreferrer' }, src.locator)));
+    } else if (src.locator && src.locator !== src.title) {
+      parts.push(el('p', { class: 'w-summary' }, src.locator));
+    }
+    parts.push(el('h2', {}, '원문'));
+    if (src.text !== null && src.text !== undefined) {
+      parts.push(el('div', { class: 'l-excerpt', 'data-source-text': true }, src.text));
+      if (src.text_truncated) parts.push(el('p', { class: 'w-muted' }, '원문이 길어 앞부분 200,000자만 표시합니다.'));
+    } else {
+      // Conversations and web pages are not stored in full; nothing is fetched or collected here.
+      parts.push(el('p', { class: 'w-muted', 'data-no-text': true }, '원문은 저장되지 않았습니다. 저장할 때 남긴 발췌와 근거 인용만 표시합니다.'));
+      if (src.excerpt) parts.push(el('div', { class: 'l-excerpt' }, src.excerpt));
+      if (src.evidence.length) {
+        parts.push(el('h2', {}, '근거 인용'), src.evidence.map(e => el('div', { class: 'w-detail-line' },
+          `${EVIDENCE_LABEL[e.evidence_kind] || e.evidence_kind} · ${e.excerpt}`)));
+      }
+    }
+    parts.push(el('h2', {}, '이 소스와 연결된 지식'), src.pages.length
+      ? src.pages.map(p => el('button', { type: 'button', class: 'w-inline-link', 'data-open': p.id, onclick: () => openTab(`doc:${p.id}`) }, `${p.title} →`))
+      : el('p', { class: 'w-muted' }, '연결된 문서가 없습니다.'));
+    return el('article', { class: 'w-paper' }, parts);
+  }
+
+  function documentList() {
+    const rows = listView.items.map(docRow);
+    let tail = null;
+    if (listView.loading) tail = el('p', { class: 'w-muted' }, '불러오는 중입니다.');
+    else if (listView.loaded && !rows.length) tail = el('p', { class: 'w-muted' }, '문서가 없습니다.');
+    else if (listView.items.length < listView.total) {
+      tail = el('div', { class: 'w-actions' }, el('button', { type: 'button', class: 'w-outline', 'data-more': true,
+        onclick: () => loadList(listView.type, { more: true }) }, '더 보기'),
+      el('span', { class: 'w-muted' }, `${listView.total}개 중 ${listView.items.length}개`));
+    }
+    return el('div', { class: 'w-flat' }, el('h1', {}, '전체 문서'),
+      el('div', { class: 'w-filters' }, LIST_FILTERS.map(([label, type]) => el('button', { type: 'button', 'data-filter': label,
+        class: listView.type === type ? 'active' : '', onclick: () => loadList(type) }, label))),
+      rows, tail);
   }
 
   function paper(detail) {
@@ -379,7 +563,29 @@
     return el('article', { class: 'w-paper' }, parts);
   }
 
+  function propertyPanel(title, rows, docs) {
+    return el('aside', { class: 'w-context' }, el('div', { class: 'l-pane-title' }, '속성'),
+      el('div', { class: 'w-details' }, el('h3', {}, title),
+        el('dl', {}, rows.filter(([, v]) => v).map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])),
+        el('h3', {}, '연결된 지식'),
+        docs.length ? docs.map(d => el('button', { type: 'button', class: 'w-inline-link', 'data-open': d.id, onclick: () => openTab(`doc:${d.id}`) }, d.title))
+          : el('p', { class: 'w-muted' }, '연결된 문서가 없습니다.')));
+  }
+
   function contextPanel(screen) {
+    if (screen === 'session' || screen === 'source') {
+      const found = (screen === 'session' ? sessions : sources).get(objectOf(state.active));
+      if (!found) return el('aside', { class: 'w-context' }, el('div', { class: 'w-empty' }, '불러오는 중입니다.'));
+      if (screen === 'session') {
+        const docs = sessionDocs(found);
+        return propertyPanel(found.title, [['구분', found.parents.length ? `하위 목차 (상위: ${found.parents.map(p => p.title).join(', ')})` : '목차 묶음'],
+          ['연결 문서', `${docs.length}개`], ['소스', `${found.sources.length}개`], ['수정일', when(found.updated_at)]], docs);
+      }
+      const match = found.verification && found.verification.match;
+      return propertyPanel(found.title, [['구분', `${found.kind_label} 소스`], ['연결 문서', `${found.pages.length}개`],
+        ['수집일', when(found.captured_at)], ['읽기', PARSE_LABEL[found.parse_status] || found.parse_status],
+        ['원문 대조', match ? MATCH_LABEL[match] || match : null], ['원문', found.text === null ? '저장되지 않음(발췌만)' : null]], found.pages);
+    }
     const detail = currentDetail();
     if (screen !== 'document' || !detail) {
       return el('aside', { class: 'w-context' }, el('div', { class: 'w-empty' }, screen === 'document' ? '문서를 불러오는 중입니다.' : '이 화면의 속성은 다음 단계에서 연결합니다.'));
@@ -432,12 +638,39 @@
   function searchDialog() {
     if (!state.searching) { overlay.replaceChildren(); return; }
     const close = () => { state.searching = false; searchDialog(); };
+    const input = el('input', { 'data-query': true, 'aria-label': '검색어', placeholder: '문서 제목이나 내용 검색' });
+    input.value = state.query;
+    const results = el('div', { 'data-results': true });
     overlay.replaceChildren(el('div', { class: 'w-overlay', onkeydown: e => { if (e.key === 'Escape') close(); } },
       el('section', { class: 'w-search-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': '전체 지식 검색' },
         el('div', { class: 'w-search-head' }, el('h3', {}, '전체 지식 검색'), el('button', { type: 'button', 'data-search-close': true, onclick: close }, '닫기')),
-        el('input', { 'data-query': true, 'aria-label': '검색어', placeholder: '문서 제목이나 내용 검색', disabled: true }),
-        el('p', { class: 'w-muted' }, `검색은 Phase ${LATER.search}에서 저장소와 연결합니다.`))));
-    $('[data-search-close]', overlay).focus();
+        input, results)));
+    let timer = null;
+    input.addEventListener('input', () => { state.query = input.value; clearTimeout(timer); timer = setTimeout(() => search(results), 250); });
+    search(results);
+    input.focus();
+  }
+
+  // The same search engine as `buildlog query`; records outside the scope are listed, not hidden.
+  let searchSeq = 0;
+  async function search(box) {
+    const q = state.query.trim();
+    const seq = ++searchSeq;
+    if (!q) { box.replaceChildren(el('p', { class: 'w-muted' }, '문서 제목이나 내용을 입력하세요.')); return; }
+    box.replaceChildren(el('p', { class: 'w-muted' }, '찾는 중입니다.'));
+    try {
+      const data = await api('GET', `/api/search?q=${encodeURIComponent(q)}`);
+      if (seq !== searchSeq) return;   // a newer search started
+      const rows = [
+        ...data.results.map(r => el('button', { type: 'button', class: 'w-row', 'data-open': r.id, onclick: () => openTab(`doc:${r.id}`) },
+          el('strong', {}, r.title), el('span', {}, TYPE_LABEL[r.type] || r.type))),
+        ...data.out_of_scope.map(r => el('button', { type: 'button', class: 'w-row', 'data-open': r.id, onclick: () => openTab(`doc:${r.id}`) },
+          el('strong', {}, r.title), el('span', {}, '범위 밖 후보'))),
+      ];
+      box.replaceChildren(...(rows.length ? rows : [el('p', { class: 'w-muted' }, '찾은 기록이 없습니다.')]));
+    } catch (error) {
+      if (seq === searchSeq) box.replaceChildren(el('p', { class: 'w-muted' }, error.message));
+    }
   }
 
   function updateStatus() {
@@ -449,15 +682,24 @@
     }
     const screen = screenOf(state.active);
     const detail = currentDetail();
+    const found = screen === 'session' ? sessions.get(objectOf(state.active)) : screen === 'source' ? sources.get(objectOf(state.active)) : null;
+    let text = '작업 공간';
     if (screen === 'document' && detail) {
       const obj = detail.object_type === 'page' ? detail.record.page : detail.record[detail.object_type];
       const kind = detail.object_type === 'page' ? TYPE_LABEL[obj.type] || obj.type : OBJECT_LABEL[detail.object_type];
-      statusBox.textContent = `문서 · ${kind} · v${obj.version}${obj.summary_dirty ? ' · 요약 갱신 필요' : ''}`;
+      text = `문서 · ${kind} · v${obj.version}${obj.summary_dirty ? ' · 요약 갱신 필요' : ''}`;
+    } else if (screen === 'session' && found) {
+      text = `세션 · 목차 묶음 · 문서 ${found.children.length + 1}개`;
+    } else if (screen === 'source' && found) {
+      text = `소스 · ${found.kind_label}${found.text === null ? ' · 원문 없음(발췌만 저장됨)' : ''}`;
+    } else if (screen === 'list') {
+      text = `전체 문서 · ${listView.total}개`;
     } else if (LATER[screen]) {
-      statusBox.textContent = `${SPECIAL[screen] || (screen === 'session' ? '세션' : '소스')} · Phase ${LATER[screen]}에서 연결 예정`;
-    } else {
-      statusBox.textContent = '작업 공간';
+      text = `${SPECIAL[screen]} · Phase ${LATER[screen]}에서 연결 예정`;
     }
+    // Pages in no bundle are not hidden: they stay findable and are pointed out until they are put in an index.
+    if (lists.unbundled.length) text += ` · 목차에 없는 문서 ${lists.unbundled.length}건`;
+    statusBox.textContent = text;
   }
 
   // ------------------------------------------------------------ local graph
@@ -586,6 +828,7 @@
 
   async function start() {
     const remembered = loadPrefs();
+    loadLists();
     let id = tabFromUrl() || remembered;
     if (!id) {
       try {   // first visit: open the record the latest save touched

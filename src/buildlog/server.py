@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import db
 from .db import BuildlogError, ConflictError, NotFoundError, ValidationError
+from .browse import list_pages, list_sessions, list_sources, session_detail, source_detail
 from .graph import graph, list_runs, object_detail
 from .update import add_feedback, merge_pages, set_feedback_status, unlink_relation, update_object
 
@@ -208,6 +209,19 @@ class Handler(BaseHTTPRequestHandler):
                     if not params.get(key):
                         raise ApiError(HTTPStatus.BAD_REQUEST, f"{key} is required")
                 return paths(store, params["system"], params["from"], params["to"], params.get("purpose"))
+            if path == "/api/pages":
+                return list_pages(store, params.get("type") or None, params.get("status") or None, params.get("sort") or None,
+                                  params.get("offset"), params.get("limit"))
+            if path == "/api/sessions":
+                return list_sessions(store)
+            if path == "/api/sources":
+                return list_sources(store, params.get("kind") or None, params.get("q") or None)
+            m = re.fullmatch(rf"/api/sessions/{_ID}", path)
+            if m:
+                return session_detail(store, m.group(1))
+            m = re.fullmatch(rf"/api/sources/{_ID}", path)
+            if m:
+                return source_detail(store, m.group(1))
             m = re.fullmatch(rf"/api/(objects|pages|relations|terms|rules|paths)/{_ID}", path)
             if m:
                 detail = object_detail(store, m.group(2))

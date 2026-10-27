@@ -243,19 +243,89 @@ class WorkspaceEndToEnd(unittest.TestCase):
 
     def test_screens_of_later_steps_say_so_and_tabs_close(self) -> None:
         self.open_doc("빌드 목차")
-        self.page.click("button[data-list]")
-        expect(self.page.locator(".w-content > .w-empty")).to_contain_text("5-4")
         self.page.click("button.l-graph-entry")
+        expect(self.page.locator(".w-content > .w-empty")).to_contain_text("5-5")
+        self.page.click("button[data-settings]")
         expect(self.page.locator(".w-content > .w-empty")).to_contain_text("5-5")
         expect(self.page.locator(".w-tab")).to_have_count(3)
         self.page.locator(".w-tab", has_text="전체 그래프").locator("button[data-close]").click()
         expect(self.page.locator(".w-tab")).to_have_count(2)
-        self.page.click("button[data-search]")
-        expect(self.page.locator(".w-search-dialog")).to_contain_text("5-4")
-        self.page.click("button[data-search-close]")
-        expect(self.page.locator(".w-search-dialog")).to_have_count(0)
         self.goto(f"?run={self.dup_run['run_id']}")                              # the link a save hands out
         expect(self.page.locator(".w-tab.active")).to_contain_text("전체 그래프")
+
+    # ------------------------------------------------------------ Phase 5-4: explorer, list, search, sources
+
+    def test_document_list_filter_and_open(self) -> None:
+        self.open_doc("빌드 목차")
+        self.page.click("button[data-list]")
+        rows = self.page.locator(".w-flat .w-row")
+        expect(rows.first).to_be_visible()
+        total = self.q("SELECT COUNT(*) FROM pages WHERE type != 'schema_column'")[0][0]
+        expect(rows).to_have_count(total)                                  # fewer than one page of 50
+        self.page.locator(".w-filters button[data-filter='테이블']").click()
+        expect(rows).to_have_count(self.q("SELECT COUNT(*) FROM pages WHERE type = 'schema_table'")[0][0])
+        expect(self.page.locator(".w-filters button.active")).to_have_text("테이블")
+        self.page.locator(".w-flat .w-row", has_text="sensor_reading (demo_mes)").click()
+        self.expect_doc("sensor_reading (demo_mes)")
+        expect(self.page.locator(".w-paper .w-body")).to_contain_text("reading_time")   # the table's rule reaches the page
+
+    def test_search_dialog_opens_a_document(self) -> None:
+        self.open_doc("빌드 목차")
+        self.page.click("button[data-search]")
+        self.page.locator("input[data-query]").fill("빌드 캐시 오류")
+        result = self.page.locator(".w-search-dialog .w-row", has_text="중복 A: 빌드 캐시 오류")
+        expect(result).to_be_visible()
+        result.click()
+        expect(self.page.locator(".w-search-dialog")).to_have_count(0)
+        self.expect_doc("중복 A: 빌드 캐시 오류")
+        self.page.click("button[data-search]")
+        self.page.locator("input[data-query]").fill("zzz없는기록zzz")
+        expect(self.page.locator(".w-search-dialog [data-results]")).to_contain_text("찾은 기록이 없습니다")
+        self.page.keyboard.press("Escape")
+        expect(self.page.locator(".w-search-dialog")).to_have_count(0)
+
+    def test_explorer_sessions_open_documents_and_session_tab(self) -> None:
+        self.open_doc("중복 A: 빌드 캐시 오류")
+        tree = self.page.locator(".l-tree-body")
+        toc = self.page_id("빌드 목차")
+        expect(tree.locator(f"button[data-session='{toc}']")).to_be_visible()
+        expect(tree.locator(f"button[data-session='{self.page_id('데모 MES 목차')}']")).to_be_visible()
+        expect(tree.locator(f"button[data-open='{self.page_id('중복 A: 빌드 캐시 오류')}']")).to_have_class("selected")
+        tree.locator(f"button[data-open='{self.page_id('빌드 캐시')}']").click()
+        self.expect_doc("빌드 캐시")
+        self.page.locator("[data-navigator-filter]").fill("데모")                 # the filter keeps only matching sessions
+        expect(tree.locator("button[data-session]")).to_have_count(1)
+        self.page.locator("[data-navigator-filter]").fill("")
+        tree.locator(f"button[data-session='{toc}']").click()
+        expect(self.page.locator("#session-title")).to_have_text("빌드 목차")
+        expect(self.page.locator(".w-paper .w-row")).to_have_count(4)             # the index itself and its 3 members
+        expect(self.page.locator(".w-context dl")).to_contain_text("4개")
+        self.page.locator(".w-paper button[data-source]").first.click()
+        expect(self.page.locator("#source-title")).to_have_text("test")
+        self.page.go_back()
+        expect(self.page.locator("#session-title")).to_have_text("빌드 목차")
+
+    def test_source_tab_shows_what_was_stored(self) -> None:
+        self.open_doc("빌드 목차")
+        self.page.locator(".l-navtabs button[data-navigator='sources']").click()
+        self.page.locator(".l-tree-body button.l-source", has_text="operations_guide.md").click()
+        expect(self.page.locator("#source-title")).to_have_text("operations_guide.md")
+        expect(self.page.locator("[data-source-text]")).to_contain_text("reading_time 기간 조건을 건다")
+        expect(self.page.locator(".w-context dl")).to_contain_text("문서 소스")
+        self.page.locator(".w-paper .w-inline-link", has_text="데모 MES 데이터 사용 가이드").click()
+        self.expect_doc("데모 MES 데이터 사용 가이드")
+        # A conversation was never stored in full: only its saved excerpt and quotes are shown.
+        self.page.locator(".l-tree-body button.l-source", has_text="test").first.click()
+        expect(self.page.locator("[data-no-text]")).to_be_visible()
+        expect(self.page.locator(".w-paper")).to_contain_text("A에서 본 출력")
+
+    def test_evidence_opens_its_source(self) -> None:
+        self.open_doc("중복 A: 빌드 캐시 오류")
+        self.info("근거")
+        self.page.locator(".w-details .w-evidence button[data-source]").first.click()
+        expect(self.page.locator("#source-title")).to_have_text("test")
+        expect(self.page.locator(".w-paper")).to_contain_text("중복 A: 빌드 캐시 오류")   # linked knowledge
+        self.assertIn("tab=source:", self.page.url)
 
 
 if __name__ == "__main__":

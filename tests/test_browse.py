@@ -18,7 +18,7 @@ from buildlog.server import start_in_thread
 from buildlog.store import ingest
 from buildlog.update import merge_pages
 
-PENDING = unittest.expectedFailure  # Phase 5-4 (pages, sessions, sources) and 5-5 (settings, graph mode=all)
+PENDING = unittest.expectedFailure  # Phase 5-5 (settings, graph mode=all)
 
 GUIDE = "# 빌드 가이드\n\n캐시는 매일 지운다.\n"
 DDL = """CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
@@ -125,7 +125,6 @@ class BrowseApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------ /api/pages
 
-    @PENDING
     def test_pages_list_shape_and_defaults(self) -> None:
         data = self.ok("/api/pages")
         titles = [i["title"] for i in data["items"]]
@@ -140,7 +139,6 @@ class BrowseApiTests(unittest.TestCase):
         stamps = [i["updated_at"] for i in data["items"]]
         self.assertEqual(stamps, sorted(stamps, reverse=True))
 
-    @PENDING
     def test_pages_filter_sort_and_paging(self) -> None:
         experiences = self.ok("/api/pages?type=experience&sort=title")
         self.assertEqual([i["title"] for i in experiences["items"]], ["권한 오류", "캐시 오류"])
@@ -155,7 +153,6 @@ class BrowseApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------ /api/sessions
 
-    @PENDING
     def test_sessions_are_top_level_indexes_with_ordered_members(self) -> None:
         data = self.ok("/api/sessions")
         self.assertEqual([s["title"] for s in data["sessions"]], ["빌드 목차"])   # 하위 목차 has a parent
@@ -166,12 +163,10 @@ class BrowseApiTests(unittest.TestCase):
         self.assertNotIn(session["id"], [c["id"] for c in session["children"]])
         self.assertEqual(session["summary_line"], "빌드 문제 모음")
 
-    @PENDING
     def test_unbundled_pages_are_reported_not_hidden(self) -> None:
         unbundled = self.ok("/api/sessions")["unbundled"]
         self.assertEqual([(u["title"], u["type"]) for u in unbundled], [("빌드 캐시", "concept")])  # columns belong to tables
 
-    @PENDING
     def test_session_detail(self) -> None:
         toc = self.ids_by_title["빌드 목차"]
         listed = self.ok("/api/sessions")["sessions"][0]
@@ -189,7 +184,6 @@ class BrowseApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------ /api/sources
 
-    @PENDING
     def test_sources_list(self) -> None:
         sources = self.ok("/api/sources")["sources"]
         by_kind = {s["kind"]: s for s in sources}
@@ -205,7 +199,6 @@ class BrowseApiTests(unittest.TestCase):
         self.assertEqual([s["title"] for s in self.ok("/api/sources?q=GUIDE")["sources"]], ["guide.md"])
         self.assertEqual(self.get("/api/sources?kind=nope")[0], 400)
 
-    @PENDING
     def test_file_source_detail_has_text_and_linked_pages(self) -> None:
         detail = self.ok(f"/api/sources/{self.source_id('markdown')}")
         self.assertEqual(detail["text"], GUIDE)
@@ -216,7 +209,6 @@ class BrowseApiTests(unittest.TestCase):
         self.assertIn("권한 오류", titles)    # evidence linked to a term on the page
         self.assertIn("캐시는 매일 지운다.", [e["excerpt"] for e in detail["evidence"]])
 
-    @PENDING
     def test_conversation_source_shows_only_what_was_stored(self) -> None:
         conv = self.q("SELECT id FROM sources WHERE locator = ?", CONVERSATION)[0][0]
         detail = self.ok(f"/api/sources/{conv}")
