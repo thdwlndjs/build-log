@@ -11,8 +11,6 @@ from typing import Any
 from buildlog.db import ValidationError
 from buildlog.store import ingest
 
-PENDING = unittest.expectedFailure  # Phase 5-2
-
 DDL = """CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customer(id), amount NUMERIC);
 """
@@ -55,7 +53,6 @@ class BundleTests(unittest.TestCase):
     def page_id(self, title: str) -> str:
         return self.q("SELECT id FROM pages WHERE title = ?", title)[0]["id"]
 
-    @PENDING
     def test_new_page_without_bundle_is_rejected(self) -> None:
         with self.assertRaises(ValidationError) as raised:
             ingest(self.store, base("k:orphan", [experience("p", "소속 없는 경험")]))
@@ -84,7 +81,6 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(self.q("SELECT index_page_id FROM index_members WHERE child_page_id = ?", self.page_id("하위 목차"))[0][0],
                          self.page_id("상위 목차"))
 
-    @PENDING
     def test_schema_tables_need_a_bundle_and_columns_do_not(self) -> None:
         ddl = self.dir / "shop.sql"
         ddl.write_text(DDL, encoding="utf-8")
@@ -106,7 +102,6 @@ class BundleTests(unittest.TestCase):
                                                 {"index": "toc", "child": "shop:orders", "position": 2}]))
         self.assertGreater(self.q("SELECT COUNT(*) FROM pages WHERE type = 'schema_column'")[0][0], 0)
 
-    @PENDING
     def test_updating_an_unbundled_existing_page_warns(self) -> None:
         ingest(self.store, base("k:legacy", [experience("p", "예전 경험"), index("toc", "목차")], [{"index": "toc", "child": "p", "position": 1}]))
         page = self.q("SELECT id, version FROM pages WHERE title = '예전 경험'")[0]

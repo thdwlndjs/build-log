@@ -281,7 +281,8 @@ class _Apply:
         for i, rule in enumerate(self.plan["rules"]):
             self._rule(rule, f"rules[{i}]")
         self._check_prior()
-        research = [self._research_request(item, f"research[{i}]") for i, item in enumerate(self.plan["research"])]
+        self._check_bundles()
+        research =[self._research_request(item, f"research[{i}]") for i, item in enumerate(self.plan["research"])]
         if research:
             self.c.execute("UPDATE runs SET research_status = 'pending' WHERE id = ?", (self.run_id,))
             self.created["research_requests"] = research
@@ -315,6 +316,29 @@ class _Apply:
             self.warnings.append("prior_check says already_recorded, but the plan still creates a new experience page")
         self.prior = prior
 
+    def _check_bundles(self) -> None:
+        """Every page belongs to an index (spec §3). An index without a parent is a top-level bundle;
+        a column belongs to its table through PART_OF."""
+
+        def unbundled(page_id: str) -> sqlite3.Row | None:
+            row = self.c.execute("SELECT id, type, title FROM pages WHERE id = ?", (page_id,)).fetchone()
+            if row is None or row["type"] in ("index", "schema_column"):
+                return None
+            if self.c.execute("SELECT 1 FROM index_members WHERE child_page_id = ? LIMIT 1", (page_id,)).fetchone():
+                return None
+            return row
+
+        missing = [row for p in self.created.get("pages", []) if (row := unbundled(p["id"]))]
+        if missing:
+            names = "; ".join(f"{r['title']} ({r['type']}, {r['id']})" for r in missing)
+            raise ValidationError(
+                f"BUNDLE_REQUIRED: new pages must belong to an index: {names}. Add them with index_members "
+                "to an existing index id, or to a new index page (an index without a parent is a top-level bundle)")
+        for item in self.updated:
+            if item.get("type") == "page" and (row := unbundled(item["id"])):
+                self.warnings.append(f"BUNDLE_MISSING: page {row['title']} ({row['id']}) is not in any index; "
+                                     "add it to one with index_members")
+
     def _research_request(self, item: dict[str, Any], where: str) -> dict[str, Any]:
         # Only recorded here. The research itself runs later (`buildlog research`), outside this
         # transaction, so a slow or failing external call can never undo the saved experience.
@@ -346,8 +370,10 @@ class _Apply:
         if partial:
             result["partial_sources"] = partial
         host_pages = [p for p in self.created.get("pages", []) if p.get("ref") is not None]
-        if len(host_pages) == 1:
-            result["page_id"] = host_pages[0]["id"]
+        # A new record usually comes with the index it belongs to; the record is still "the" page.
+        content_pages = [p for p in host_pages if p.get("type") != "index"] or host_pages
+        if len(content_pages) == 1:
+            result["page_id"] = content_pages[0]["id"]
             result["version"] = 1
         self.c.execute(
             """UPDATE runs SET stage = 'committed', status = 'succeeded', input_hash = ?, result_json = ?, error = NULL,

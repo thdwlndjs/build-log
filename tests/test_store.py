@@ -27,7 +27,8 @@ from buildlog.store import (
 SRC = Path(__file__).resolve().parents[1] / "src"
 
 
-def sample_plan() -> dict[str, object]:
+def v1_plan() -> dict[str, object]:
+    """The Phase 1 single-page plan shape. It cannot name an index, so it can no longer create a record."""
     return {
         "idempotency_key": "phase-1-test",
         "page": {
@@ -43,6 +44,19 @@ def sample_plan() -> dict[str, object]:
             "accessible_excerpt": "SQLite FTS5 생성이 성공했다.",
         },
         "evidence": [{"section_locator": "environment-check", "excerpt": "FTS5 available", "evidence_kind": "observed"}],
+    }
+
+
+def sample_plan() -> dict[str, object]:
+    """The same record as v1_plan, saved with the index it belongs to (spec §3)."""
+    v1 = v1_plan()
+    return {
+        "idempotency_key": v1["idempotency_key"],
+        "sources": [{"ref": "s", **v1["source"]}],  # type: ignore[dict-item]
+        "evidence": [{"ref": "e", "source": "s", **v1["evidence"][0]}],  # type: ignore[index]
+        "pages": [{"ref": "p", **v1["page"], "evidence": ["e"]},  # type: ignore[dict-item]
+                  {"ref": "toc", "type": "index", "title": "환경 점검 목차", "summary_md": "환경 점검 기록", "body_md": "목차"}],
+        "index_members": [{"index": "toc", "child": "p", "position": 1}],
     }
 
 
@@ -79,7 +93,7 @@ class StoreTests(unittest.TestCase):
     def test_same_key_with_different_input_conflicts(self) -> None:
         ingest(self.store, sample_plan())
         changed = sample_plan()
-        changed["page"] = {**changed["page"], "title": "변경된 제목"}  # type: ignore[index]
+        changed["pages"][0]["title"] = "변경된 제목"  # type: ignore[index]
         with self.assertRaises(ConflictError):
             ingest(self.store, changed)
 
@@ -92,7 +106,7 @@ class StoreTests(unittest.TestCase):
 
     def test_invalid_input_does_not_create_database_rows(self) -> None:
         invalid = sample_plan()
-        invalid["page"] = {"title": "불완전"}
+        invalid["pages"][0] = {"ref": "p", "type": "experience", "title": "불완전"}  # type: ignore[index]
         with self.assertRaises(ValidationError):
             ingest(self.store, invalid)
         # No data, but the failed attempt is kept with its stage and reason.
@@ -100,7 +114,7 @@ class StoreTests(unittest.TestCase):
                          {"pages": 0, "sources": 0, "evidence": 0, "page_sources": 0, "revisions": 0})
         run = _run(self.store, "phase-1-test")
         self.assertEqual((run["stage"], run["status"], run["error_kind"]), ("received", "failed", "validation"))
-        self.assertIn("page.summary_md", run["error"])
+        self.assertIn("pages[0]", run["error"])
 
     def test_credentials_are_rejected(self) -> None:
         invalid = sample_plan()
@@ -113,7 +127,7 @@ class StoreTests(unittest.TestCase):
         before = _row_counts(self.store)
         invalid = sample_plan()
         invalid["idempotency_key"] = "another-key"
-        invalid["page"] = {"title": "불완전"}
+        invalid["pages"][0] = {"ref": "p", "type": "experience", "title": "불완전"}  # type: ignore[index]
         with self.assertRaises(ValidationError):
             ingest(self.store, invalid)
         self.assertEqual(_data_counts(self.store), _data_counts_of(before))
@@ -126,8 +140,8 @@ class StoreTests(unittest.TestCase):
         plan = sample_plan()
         plan["idempotency_key"] = "rollback-test"
         plan["evidence"] = [
-            {"section_locator": "a", "excerpt": "first", "evidence_kind": "observed"},
-            {"section_locator": "b", "excerpt": "second", "evidence_kind": "observed"},
+            {"ref": "e", "source": "s", "section_locator": "a", "excerpt": "first", "evidence_kind": "observed"},
+            {"ref": "e2", "source": "s", "section_locator": "b", "excerpt": "second", "evidence_kind": "observed"},
         ]
         # Ids are handed out as run, source, evidence 1, evidence 2. The second evidence
         # row reuses the first one's id, so its insert fails after the source and first
@@ -160,6 +174,12 @@ class StoreTests(unittest.TestCase):
             )]
         self.assertEqual(versions, [1, 2])
         self.assertIn("수정됨", read_page(self.store, created["page_id"])["page"]["body_md"])
+
+    def test_v1_plan_cannot_create_a_record_without_an_index(self) -> None:
+        with self.assertRaises(ValidationError) as raised:
+            ingest(self.store, v1_plan())
+        self.assertIn("BUNDLE_REQUIRED", str(raised.exception))
+        self.assertEqual(_data_counts(self.store)["pages"], 0)
 
     def test_read_missing_page_and_missing_store(self) -> None:
         with self.assertRaises(NotFoundError):
@@ -237,7 +257,7 @@ class CliProcessTests(unittest.TestCase):
         self.write_plan(sample_plan())
         self.run_cli("ingest", "--input", str(self.dir / "plan.json"))
         changed = sample_plan()
-        changed["page"] = {**changed["page"], "title": "다른 제목"}  # type: ignore[index]
+        changed["pages"][0]["title"] = "다른 제목"  # type: ignore[index]
         conflict = self.run_cli("ingest", "--input", str(self.write_plan(changed, "changed.json")))
         self.assertEqual(conflict.returncode, 3)
         self.assertIn("IDEMPOTENCY_CONFLICT", conflict.stderr.decode("utf-8"))

@@ -43,7 +43,14 @@
     {"ref": "pyenc", "type": "experience", "title": "Git Bash 한글 깨짐: PYTHONIOENCODING=utf-8",
      "summary_md": "PYTHONIOENCODING=utf-8을 설정하자 Python의 한글 출력이 정상으로 나왔다.",
      "body_md": "## 문제\n\nGit Bash에서 Python 한글 출력이 깨짐.\n\n## Mitigation\n\n`PYTHONIOENCODING=utf-8` 환경 변수.\n\n## RCA 상태\n\nPython 표준 출력이 콘솔 코드페이지(cp949)로 인코딩되던 것이 원인.",
-     "evidence": ["e-pyenc"]}
+     "evidence": ["e-pyenc"]},
+    {"ref": "toc", "type": "index", "title": "회귀 테스트 목차", "summary_md": "고정 데이터 묶음", "body_md": "목차"}
+  ],
+  "index_members": [
+    {"index": "toc", "child": "ora", "position": 1}, {"index": "toc", "child": "pip-trusted", "position": 2},
+    {"index": "toc", "child": "pip-proxy", "position": 3}, {"index": "toc", "child": "agy", "position": 4},
+    {"index": "toc", "child": "docker", "position": 5}, {"index": "toc", "child": "chcp", "position": 6},
+    {"index": "toc", "child": "pyenc", "position": 7}
   ],
   "relations": [
     {"source": "pip-proxy", "target": "pip-trusted", "type": "CONTRADICTS",

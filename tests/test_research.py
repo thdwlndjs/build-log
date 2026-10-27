@@ -29,7 +29,9 @@ def plan_with_research() -> dict[str, Any]:
         "sources": [{"ref": "chat", "kind": "conversation", "locator": "test", "accessible_excerpt": "검색 색인 설계"}],
         "evidence": [{"ref": "e1", "source": "chat", "evidence_kind": "observed", "excerpt": "trigram 색인으로 한국어 부분 일치"}],
         "pages": [{"ref": "p", "type": "experience", "title": "한국어 부분 일치 검색에 FTS5 trigram 사용",
-                   "summary_md": "trigram으로 조사 붙은 한국어를 찾는다.", "body_md": "## 문제\n\n한국어 부분 일치.", "evidence": ["e1"]}],
+                   "summary_md": "trigram으로 조사 붙은 한국어를 찾는다.", "body_md": "## 문제\n\n한국어 부분 일치.", "evidence": ["e1"]},
+                  {"ref": "toc", "type": "index", "title": "검색 목차", "summary_md": "검색 기록", "body_md": "목차"}],
+        "index_members": [{"index": "toc", "child": "p", "position": 1}],
         "research": [{"question": "Does the SQLite FTS5 trigram tokenizer support substring matching?", "page": "p",
                       "context": "Korean substring search in a local SQLite store"}],
     }

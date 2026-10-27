@@ -39,7 +39,8 @@ def duplicates_plan() -> dict[str, Any]:
             {"ref": "x", "type": "concept", "title": "빌드 캐시", "summary_md": "개념", "body_md": "개념 설명", "evidence": ["ea"]},
             {"ref": "toc", "type": "index", "title": "빌드 목차", "summary_md": "목차", "body_md": "목차"},
         ],
-        "index_members": [{"index": "toc", "child": "b", "position": 1}],
+        "index_members": [{"index": "toc", "child": "b", "position": 1}, {"index": "toc", "child": "a", "position": 2},
+                          {"index": "toc", "child": "x", "position": 3}],
         "terms": [{"expression": "캐시 무효화", "scope": "test:build", "page": "b", "definition_md": "정의", "evidence": ["eb"], "status": "extracted"}],
         "relations": [
             {"source": "a", "target": "x", "type": "USES", "explanation_md": "A uses", "evidence": ["ea"], "status": "extracted"},
@@ -160,7 +161,9 @@ class MergeTests(Base):
         evidence = {r[0] for r in self.q("SELECT e.excerpt FROM object_evidence oe JOIN evidence e ON e.id = oe.evidence_id WHERE oe.object_id = ?", uses[0]["id"])}
         self.assertEqual(evidence, {"A에서 본 출력", "B에서 본 출력"})
         self.assertEqual(self.q("SELECT page_id FROM term_senses WHERE scope = 'test:build'")[0][0], a["id"])
-        self.assertEqual({r[0] for r in self.q("SELECT child_page_id FROM index_members WHERE index_page_id = ?", self.page("빌드 목차")["id"])}, {a["id"]})
+        # B's place in the index is folded into A, which was already there.
+        self.assertEqual({r[0] for r in self.q("SELECT child_page_id FROM index_members WHERE index_page_id = ?", self.page("빌드 목차")["id"])},
+                         {a["id"], self.page("빌드 캐시")["id"]})
         page_evidence = {r[0] for r in self.q("SELECT e.excerpt FROM page_sources ps JOIN evidence e ON e.id = ps.evidence_id WHERE ps.page_id = ?", a["id"])}
         self.assertIn("B에서 본 출력", page_evidence)
         record = read_object(self.store, b["id"])
@@ -173,7 +176,8 @@ class MergeTests(Base):
                 "sources": [{"ref": "c", "kind": "conversation", "locator": "t", "accessible_excerpt": "x"}],
                 "evidence": [{"ref": "e", "source": "c", "evidence_kind": "observed", "excerpt": "follow-up"}],
                 "pages": [{"ref": "n", "type": "experience", "title": "후속", "summary_md": "s", "body_md": "b", "evidence": ["e"]}],
-                "relations": [{"source": "n", "target": b["id"], "type": "RELATED_TO", "explanation_md": "follow-up", "evidence": ["e"], "status": "inferred"}]}
+                "relations": [{"source": "n", "target": b["id"], "type": "RELATED_TO", "explanation_md": "follow-up", "evidence": ["e"], "status": "inferred"}],
+                "index_members": [{"index": self.page("빌드 목차")["id"], "child": "n", "position": 9}]}
         ingest(self.store, plan)
         self.assertEqual(self.q("SELECT target_id FROM relations WHERE explanation_md = 'follow-up'")[0][0], a["id"])
 

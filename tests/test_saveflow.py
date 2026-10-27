@@ -49,7 +49,7 @@ class SaveFlowTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_missing_lookup_is_reported(self) -> None:
-        result = ingest(self.store, follow_up("k1", None, None))
+        result = ingest(self.store, follow_up("k1", None, None, self.in_toc()))
         self.assertTrue(any("prior_check missing" in w for w in result["warnings"]))
 
     def test_follow_up_with_concept_and_index_update(self) -> None:
@@ -82,7 +82,7 @@ class SaveFlowTests(unittest.TestCase):
 
     def test_decision_mismatch_and_unknown_candidate(self) -> None:
         prior = {"query": "q", "candidates": [self.a], "decision": "update", "reason": "r"}
-        result = ingest(self.store, follow_up("k3", prior, None))
+        result = ingest(self.store, follow_up("k3", prior, None, self.in_toc()))
         self.assertTrue(any("says update" in w for w in result["warnings"]))
         bad = {"query": "q", "candidates": ["00000000-0000-0000-0000-000000000000"], "decision": "new", "reason": "r"}
         with self.assertRaises(ValidationError):
@@ -100,6 +100,10 @@ class SaveFlowTests(unittest.TestCase):
         self.assertEqual(self.count_pages(), before)
         self.assertEqual([u["id"] for u in result["updated"]], [self.a])
         self.assertEqual([w for w in result["warnings"] if "prior_check" in w], [])
+
+    def in_toc(self) -> dict[str, Any]:
+        """Every new page belongs to an index (spec §3)."""
+        return {"index_members": [{"index": self.toc[0], "child": "n", "position": 9}]}
 
     def count_pages(self) -> int:
         with closing(sqlite3.connect(self.store)) as c:

@@ -59,6 +59,11 @@ def demo_plan() -> dict[str, Any]:
         "index_members": [
             {"index": "toc", "child": "guide-page", "position": 1},
             {"index": "toc", "child": "demo_mes:sensor_reading", "position": 2},
+            {"index": "toc", "child": "demo_mes:site", "position": 3},
+            {"index": "toc", "child": "demo_mes:equipment", "position": 4},
+            {"index": "toc", "child": "demo_mes:employee", "position": 5},
+            {"index": "toc", "child": "demo_crm:crm.customer", "position": 6},
+            {"index": "toc", "child": "demo_crm:crm.sales_order", "position": 7},
         ],
         "terms": [
             {"expression": "사업자번호", "scope": "demo_mes:site.biz_no", "page": "demo_mes:site.biz_no",
@@ -115,7 +120,9 @@ def experience_plan() -> dict[str, Any]:
         "sources": [{"ref": "chat", "kind": "conversation", "locator": "test conversation", "accessible_excerpt": "PATH 문제"}],
         "evidence": [{"ref": "e1", "source": "chat", "evidence_kind": "observed", "excerpt": "which: no agy"}],
         "pages": [{"ref": "p", "type": "experience", "title": "CLI가 PATH에 없음", "summary_md": "절대 경로로 해결",
-                   "body_md": "## 문제\n\nPATH에 없다.", "evidence": ["e1"]}],
+                   "body_md": "## 문제\n\nPATH에 없다.", "evidence": ["e1"]},
+                  {"ref": "toc", "type": "index", "title": "개발 환경 목차", "summary_md": "PATH 문제", "body_md": "목차"}],
+        "index_members": [{"index": "toc", "child": "p", "position": 1}],
     }
 
 
@@ -347,7 +354,9 @@ class ValidationTests(Base):
                 "sources": [{"ref": "ddl", "kind": "sql_ddl", "dialect": "postgresql", "system_key": "s", "content": sql},
                             {"ref": "doc", "kind": "text", "content": "t는 중요하다"}],
                 "evidence": [{"ref": "e", "source": "doc", "evidence_kind": "observed", "excerpt": "t는 중요하다"}],
-                "rules": [{"scope": "s:t", "kind": "requirement", "instruction_md": "x", "reason_md": "y", "evidence": ["e"], "status": "extracted"}]}
+                "rules": [{"scope": "s:t", "kind": "requirement", "instruction_md": "x", "reason_md": "y", "evidence": ["e"], "status": "extracted"}],
+                "pages": [{"ref": "toc", "type": "index", "title": "s 목차", "summary_md": "s", "body_md": "목차"}],
+                "index_members": [{"index": "toc", "child": "s:a.t", "position": 1}, {"index": "toc", "child": "s:b.t", "position": 2}]}
         with self.assertRaises(ValidationError) as raised:
             ingest(self.store, plan)
         self.assertIn("several schemas", str(raised.exception))

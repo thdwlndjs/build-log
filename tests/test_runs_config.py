@@ -29,7 +29,9 @@ def experience(key: str = "k1", title: str = "경험") -> dict[str, Any]:
         "idempotency_key": key,
         "sources": [{"ref": "c", "kind": "conversation", "locator": "test", "accessible_excerpt": "x"}],
         "evidence": [{"ref": "e", "source": "c", "evidence_kind": "observed", "excerpt": "관찰"}],
-        "pages": [{"ref": "p", "type": "experience", "title": title, "summary_md": "s", "body_md": "b", "evidence": ["e"]}],
+        "pages": [{"ref": "p", "type": "experience", "title": title, "summary_md": "s", "body_md": "b", "evidence": ["e"]},
+                  {"ref": "toc", "type": "index", "title": f"{title} 목차", "summary_md": "s", "body_md": "b"}],
+        "index_members": [{"index": "toc", "child": "p", "position": 1}],
     }
 
 
@@ -59,7 +61,7 @@ class RunStageTests(Base):
         result = ingest(self.store, experience())
         run = self.run_row("k1")
         self.assertEqual((run["stage"], run["status"], run["attempts"]), ("committed", "succeeded", 1))
-        self.assertEqual(json.loads(run["plan_summary_json"])["create"], {"pages": 1})
+        self.assertEqual(json.loads(run["plan_summary_json"])["create"], {"pages": 2, "index_members": 1})  # the record and its index
         self.assertEqual(result["status"], "complete")
 
     def test_failure_while_committing_keeps_record_and_no_data(self) -> None:
@@ -81,7 +83,7 @@ class RunStageTests(Base):
         self.assertEqual(self.data_count(), 0)
         retried = ingest(self.store, experience())
         self.assertEqual(retried["run_id"], run["id"])
-        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages")[0][0], 1)
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages WHERE type = 'experience'")[0][0], 1)
         self.assertEqual(self.run_row("k1")["attempts"], 2)
 
     def test_interrupted_run_is_retried_not_duplicated(self) -> None:
@@ -93,7 +95,7 @@ class RunStageTests(Base):
             c.commit()
         result = ingest(self.store, experience("k2", "두 번째"))
         self.assertEqual(result["run_id"], "dead")
-        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages")[0][0], 2)
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages WHERE type = 'experience'")[0][0], 2)
         self.assertEqual(tuple(self.rows("SELECT stage, status, attempts FROM runs WHERE id = 'dead'")[0]), ("committed", "succeeded", 2))
 
     def test_committed_run_is_never_marked_failed(self) -> None:
@@ -115,7 +117,7 @@ class RunStageTests(Base):
         self.assertFalse(result["reused"])
         again = ingest(self.store, experience())
         self.assertTrue(again["reused"])
-        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages")[0][0], 1)
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages WHERE type = 'experience'")[0][0], 1)
 
     def test_research_resume_needs_a_committed_run(self) -> None:
         plan = plan_with_research()
@@ -167,7 +169,7 @@ class ConcurrencyTests(Base):
         for p in procs:
             p.communicate(timeout=120)
             self.assertEqual(p.returncode, 0)
-        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages WHERE title LIKE '동시 %'")[0][0], 5)
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM pages WHERE type = 'experience' AND title LIKE '동시 %'")[0][0], 5)
 
 
 class ConfigTests(Base):
@@ -236,7 +238,9 @@ def schema_with_samples(rows: int = 3, table: str = "item", extra: dict[str, Any
 
 class EmbeddedSampleTests(Base):
     def plan(self, schema: dict[str, Any], key: str = "s1") -> dict[str, Any]:
-        return {"idempotency_key": key, "sources": [{"ref": "schema", "kind": "schema_json", "content": json.dumps(schema)}]}
+        return {"idempotency_key": key, "sources": [{"ref": "schema", "kind": "schema_json", "content": json.dumps(schema)}],
+                "pages": [{"ref": "toc", "type": "index", "title": "inv 목차", "summary_md": "s", "body_md": "b"}],
+                "index_members": [{"index": "toc", "child": "inv:item", "position": 1}]}
 
     def test_samples_use_the_sample_path(self) -> None:
         result = ingest(self.store, self.plan(schema_with_samples()))
