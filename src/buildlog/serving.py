@@ -89,9 +89,14 @@ def detach(store: Path, host: str, port: int, open_browser: bool) -> dict[str, A
         flags = 0
         if os.name == "nt":
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        command = [sys.executable, "-m", "buildlog", "--store", str(store), "serve", "--host", host, "--port", str(port)]
         with open(log, "ab") as out:
-            subprocess.Popen([sys.executable, "-m", "buildlog", "--store", str(store), "serve", "--host", host, "--port", str(port)],
-                             stdout=out, stderr=out, stdin=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+            try:
+                # Leave the caller's Windows job (an editor or agent session), or the server ends with it.
+                subprocess.Popen(command, stdout=out, stderr=out, stdin=subprocess.DEVNULL, close_fds=True,
+                                 creationflags=flags | (getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0) if os.name == "nt" else 0))
+            except OSError:   # the job does not allow breaking away: start it inside, as before
+                subprocess.Popen(command, stdout=out, stderr=out, stdin=subprocess.DEVNULL, close_fds=True, creationflags=flags)
         deadline = time.monotonic() + 15
         while url is None and time.monotonic() < deadline:
             time.sleep(0.3)
