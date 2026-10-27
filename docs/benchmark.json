@@ -1,0 +1,205 @@
+{
+ "measured_at": "2026-10-27T11:18:50+0900",
+ "machine": {
+  "os": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.9",
+  "sqlite": "3.45.3",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12700",
+  "cores": 12,
+  "threads": 20,
+  "ram_gb": 15.7
+ },
+ "runs_per_measure": 30,
+ "targets": {
+  "query_p95_ms_at_1000": 1000,
+  "graph_p95_ms_at_1000": 500
+ },
+ "sizes": {
+  "100": {
+   "build": {
+    "pages": 100,
+    "build_seconds": 0.2
+   },
+   "store_bytes": 1904640,
+   "query": {
+    "runs": 30,
+    "median_ms": 11.6,
+    "p95_ms": 19.5,
+    "max_ms": 19.6
+   },
+   "read_render": {
+    "runs": 30,
+    "median_ms": 3.1,
+    "p95_ms": 3.5,
+    "max_ms": 3.5
+   },
+   "neighbors": {
+    "runs": 30,
+    "median_ms": 2.8,
+    "p95_ms": 3.4,
+    "max_ms": 4.0
+   },
+   "graph_default": {
+    "runs": 30,
+    "median_ms": 5.8,
+    "p95_ms": 7.8,
+    "max_ms": 8.0
+   },
+   "graph_focus": {
+    "runs": 30,
+    "median_ms": 2.8,
+    "p95_ms": 3.3,
+    "max_ms": 3.5
+   },
+   "graph_search": {
+    "runs": 30,
+    "median_ms": 16.3,
+    "p95_ms": 21.3,
+    "max_ms": 39.4
+   },
+   "short_term_body_scan": {
+    "runs": 30,
+    "median_ms": 0.1,
+    "p95_ms": 0.2,
+    "max_ms": 0.4
+   },
+   "http_graph": {
+    "runs": 30,
+    "median_ms": 7.6,
+    "p95_ms": 35.8,
+    "max_ms": 38.6
+   },
+   "browser_graph_ready": {
+    "runs": 30,
+    "median_ms": 323.0,
+    "p95_ms": 365.7,
+    "max_ms": 375.0,
+    "nodes_drawn": 100
+   }
+  },
+  "1000": {
+   "build": {
+    "pages": 1000,
+    "build_seconds": 1.1
+   },
+   "store_bytes": 14827520,
+   "query": {
+    "runs": 30,
+    "median_ms": 48.5,
+    "p95_ms": 106.1,
+    "max_ms": 109.9
+   },
+   "read_render": {
+    "runs": 30,
+    "median_ms": 3.1,
+    "p95_ms": 3.6,
+    "max_ms": 4.1
+   },
+   "neighbors": {
+    "runs": 30,
+    "median_ms": 2.8,
+    "p95_ms": 3.4,
+    "max_ms": 3.5
+   },
+   "graph_default": {
+    "runs": 30,
+    "median_ms": 17.2,
+    "p95_ms": 19.4,
+    "max_ms": 19.4
+   },
+   "graph_focus": {
+    "runs": 30,
+    "median_ms": 3.0,
+    "p95_ms": 3.7,
+    "max_ms": 3.8
+   },
+   "graph_search": {
+    "runs": 30,
+    "median_ms": 48.0,
+    "p95_ms": 54.4,
+    "max_ms": 56.8
+   },
+   "short_term_body_scan": {
+    "runs": 30,
+    "median_ms": 2.4,
+    "p95_ms": 3.2,
+    "max_ms": 3.3
+   },
+   "http_graph": {
+    "runs": 30,
+    "median_ms": 19.7,
+    "p95_ms": 41.2,
+    "max_ms": 44.9
+   },
+   "browser_graph_ready": {
+    "runs": 30,
+    "median_ms": 546.7,
+    "p95_ms": 692.0,
+    "max_ms": 717.4,
+    "nodes_drawn": 150
+   }
+  },
+  "10000": {
+   "build": {
+    "pages": 10000,
+    "build_seconds": 19.2
+   },
+   "store_bytes": 144961536,
+   "query": {
+    "runs": 30,
+    "median_ms": 124.2,
+    "p95_ms": 250.9,
+    "max_ms": 251.0
+   },
+   "read_render": {
+    "runs": 30,
+    "median_ms": 4.1,
+    "p95_ms": 5.0,
+    "max_ms": 5.4
+   },
+   "neighbors": {
+    "runs": 30,
+    "median_ms": 3.4,
+    "p95_ms": 4.9,
+    "max_ms": 5.0
+   },
+   "graph_default": {
+    "runs": 30,
+    "median_ms": 38.7,
+    "p95_ms": 54.3,
+    "max_ms": 56.4
+   },
+   "graph_focus": {
+    "runs": 30,
+    "median_ms": 8.9,
+    "p95_ms": 14.2,
+    "max_ms": 17.6
+   },
+   "graph_search": {
+    "runs": 30,
+    "median_ms": 120.3,
+    "p95_ms": 200.3,
+    "max_ms": 210.2
+   },
+   "short_term_body_scan": {
+    "runs": 30,
+    "median_ms": 50.0,
+    "p95_ms": 69.3,
+    "max_ms": 69.4
+   },
+   "http_graph": {
+    "runs": 30,
+    "median_ms": 41.4,
+    "p95_ms": 72.4,
+    "max_ms": 73.2
+   },
+   "browser_graph_ready": {
+    "runs": 30,
+    "median_ms": 839.7,
+    "p95_ms": 1006.8,
+    "max_ms": 1128.8,
+    "nodes_drawn": 150
+   }
+  }
+ }
+}
