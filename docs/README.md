@@ -245,7 +245,7 @@ py -3.12 -m venv .venv
 | 저장 실패 | `runs --status failed`로 단계·오류 종류·메시지 확인 | 계획을 고쳐 같은 `idempotency_key`로 `ingest` 재실행. 실패한 저장은 데이터를 남기지 않음 |
 | 조사 실패(종료 코드 5) | 출력의 실패 종류(`auth`, `timeout` 등) | `auth`면 `agy.exe` 로그인 후, 같은 `research` 명령으로 남은 요청만 재개 |
 | 검색 결과가 이상함 | 다른 도구로 DB를 직접 고쳤는지 | `reindex` |
-| 검토 화면이 안 열림 | `serve --status` | `serve --stop` 후 `serve --detach`. 서버 정보는 저장소 옆 `serve.json` |
+| 검토 화면이 안 열림 | `serve --status` | `serve --stop` 후 `serve --detach`. 서버 정보는 저장소 옆 `<저장소 파일 이름>.serve.json`(예: `buildlog.sqlite3.serve.json`)이며 저장소마다 따로 있습니다. 이미 쓰는 포트에는 서버가 뜨지 않으니 `--port`로 다른 포트를 지정합니다 |
 | 저장소 손상·잘못된 대량 수정 | `backup` 파일의 존재 | `serve --stop` 후 `restore --from <백업>` |
 | 다른 저장소를 쓰는 것 같음 | `config show`로 값과 출처 확인 | `config set store "<경로>"` 또는 `BUILDLOG_STORE` |
 
