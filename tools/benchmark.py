@@ -63,13 +63,15 @@ def build_store(path: Path, pages: int, seed: int = 7) -> dict[str, Any]:
     batch = 500
     concept_ids: list[str] = []
     created: list[str] = []
+    top_ids: list[str] = []
+    sub_ids: list[str] = []
     started = time.perf_counter()
     for start in range(0, pages, batch):
         count = min(batch, pages - start)
         plan: dict[str, Any] = {"idempotency_key": f"bench-{pages}-{start}",
                                 "sources": [{"ref": "c", "kind": "conversation", "locator": "synthetic benchmark", "accessible_excerpt": "synthetic"}],
                                 "evidence": [{"ref": "e", "source": "c", "evidence_kind": "observed", "excerpt": "synthetic observation"}],
-                                "pages": [], "relations": [], "terms": []}
+                                "pages": [], "relations": [], "terms": [], "index_members": []}
         for i in range(count):
             n = start + i
             words = rng.sample(WORDS, 6)
@@ -88,13 +90,24 @@ def build_store(path: Path, pages: int, seed: int = 7) -> dict[str, Any]:
             if i % 10 == 0:
                 plan["terms"].append({"expression": f"{words[5]}{n}", "scope": "bench", "page": f"p{i}", "definition_md": "synthetic term",
                                       "evidence": ["e"], "status": "inferred"})
+        # Every page belongs to a bundle (spec §3): one top-level index per batch, 10 sub-indexes of up to 50 pages.
+        plan["pages"].append({"ref": "top", "type": "index", "title": f"벤치 묶음 {start // batch}", "summary_md": "synthetic bundle", "body_md": "목차"})
+        for k in range(0, count, 50):
+            sub_ref = f"sub{k}"
+            plan["pages"].append({"ref": sub_ref, "type": "index", "title": f"벤치 하위 목차 {start // batch}-{k // 50}",
+                                  "summary_md": "synthetic sub-index", "body_md": "목차"})
+            plan["index_members"].append({"index": "top", "child": sub_ref, "position": k // 50 + 1})
+            plan["index_members"] += [{"index": sub_ref, "child": f"p{i}", "position": i - k + 1} for i in range(k, min(k + 50, count))]
         result = ingest(path, plan)
         for page in result["created"]["pages"]:
+            if page["type"] == "index":
+                (top_ids if page.get("ref") == "top" else sub_ids).append(page["id"])
+                continue
             created.append(page["id"])
             if page["type"] == "concept":
                 concept_ids.append(page["id"])
-    return {"pages": len(created), "build_seconds": round(time.perf_counter() - started, 1), "page_ids": created,
-            "run_id": result["run_id"]}
+    return {"pages": len(created), "indexes": len(top_ids) + len(sub_ids), "build_seconds": round(time.perf_counter() - started, 1),
+            "page_ids": created, "top_ids": top_ids, "sub_ids": sub_ids, "run_id": result["run_id"]}
 
 
 def http_graph(server: Any, path: str) -> None:
@@ -106,7 +119,8 @@ def http_graph(server: Any, path: str) -> None:
     assert response.status == 200, response.status
 
 
-def browser_ready(url: str, runs: int) -> dict[str, Any] | None:
+def browser_ready(url: str, runs: int, graph_var: str) -> dict[str, Any] | None:
+    """Time from navigation until the workspace says it is ready (the tab's data loaded and its graph drawn)."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -122,7 +136,7 @@ def browser_ready(url: str, runs: int) -> dict[str, Any] | None:
             page.goto(url)
             page.wait_for_selector("body[data-ready=true]")
             samples.append((time.perf_counter() - start) * 1000)
-            nodes = page.evaluate("window.buildlogCy.nodes().length")
+            nodes = page.evaluate(f"window.{graph_var} ? window.{graph_var}.nodes().length : 0")
         browser.close()
     return {"runs": runs, "median_ms": round(statistics.median(samples), 1), "p95_ms": round(percentile(samples, 95), 1),
             "max_ms": round(max(samples), 1), "nodes_drawn": nodes}
@@ -160,13 +174,13 @@ def main() -> None:
                               "targets": {"query_p95_ms_at_1000": 1000, "graph_p95_ms_at_1000": 500}, "sizes": {}}
     rng = random.Random(11)
     for size in args.sizes:
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:  # a closing server may still hold the file
             store = Path(d) / "bench.sqlite3"
             built = build_store(store, size)
             ids = built["page_ids"]
             q_iter = iter(QUERIES * (args.runs // len(QUERIES) + 2))
             sample_ids = iter(rng.choices(ids, k=args.runs + 2))
-            result: dict[str, Any] = {"build": {k: built[k] for k in ("pages", "build_seconds")},
+            result: dict[str, Any] = {"build": {k: built[k] for k in ("pages", "indexes", "build_seconds")},
                                       "store_bytes": store.stat().st_size}
             result["query"] = timed(lambda: query(store, *next(q_iter)), args.runs)
             result["read_render"] = timed(lambda: render_markdown(read_object(store, next(sample_ids))), args.runs)
@@ -180,8 +194,26 @@ def main() -> None:
             server = start_in_thread(store)
             try:
                 result["http_graph"] = timed(lambda: http_graph(server, "/api/graph"), args.runs)
+                # Workspace (Phase 5): read-only lists and the whole graph.
+                with closing(sqlite3.connect(store)) as c:
+                    source_ids = [r[0] for r in c.execute("SELECT id FROM sources")]
+                offsets = iter([rng.randrange(0, max(1, size - 50)) for _ in range(args.runs + 2)])
+                workspace = {
+                    "http_pages_first": lambda: http_graph(server, "/api/pages"),
+                    "http_pages_filtered_page": lambda: http_graph(server, f"/api/pages?type=experience&sort=title&offset={next(offsets)}"),
+                    "http_sessions": lambda: http_graph(server, "/api/sessions"),
+                    "http_session_detail": (lambda it: lambda: http_graph(server, f"/api/sessions/{next(it)}"))(iter(rng.choices(built["sub_ids"], k=args.runs + 2))),
+                    "http_sources": lambda: http_graph(server, "/api/sources"),
+                    "http_source_detail": (lambda it: lambda: http_graph(server, f"/api/sources/{next(it)}"))(iter(rng.choices(source_ids, k=args.runs + 2))),
+                    "http_object_detail": (lambda it: lambda: http_graph(server, f"/api/objects/{next(it)}"))(iter(rng.choices(ids, k=args.runs + 2))),
+                    "http_graph_all": lambda: http_graph(server, "/api/graph?mode=all"),
+                    "http_settings": lambda: http_graph(server, "/api/settings"),
+                }
+                for name, fn in workspace.items():
+                    result[name] = timed(fn, args.runs)
                 if not args.no_browser:
-                    result["browser_graph_ready"] = browser_ready(server.url, args.runs)
+                    result["browser_document_ready"] = browser_ready(f"{server.url}?tab=doc:{ids[-1]}", args.runs, "buildlogLocalCy")
+                    result["browser_graph_ready"] = browser_ready(f"{server.url}?tab=graph", args.runs, "buildlogGraphCy")
             finally:
                 server.shutdown()
                 server.server_close()

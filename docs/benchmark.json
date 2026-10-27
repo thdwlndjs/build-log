@@ -1,5 +1,5 @@
 {
- "measured_at": "2026-10-27T11:18:50+0900",
+ "measured_at": "2026-10-27T15:32:10+0900",
  "machine": {
   "os": "Windows-11-10.0.26200-SP0",
   "python": "3.12.9",
@@ -18,186 +18,372 @@
   "100": {
    "build": {
     "pages": 100,
+    "indexes": 3,
     "build_seconds": 0.2
    },
-   "store_bytes": 1904640,
+   "store_bytes": 1937408,
    "query": {
     "runs": 30,
-    "median_ms": 11.6,
-    "p95_ms": 19.5,
-    "max_ms": 19.6
+    "median_ms": 14.0,
+    "p95_ms": 20.8,
+    "max_ms": 23.8
    },
    "read_render": {
     "runs": 30,
-    "median_ms": 3.1,
-    "p95_ms": 3.5,
-    "max_ms": 3.5
+    "median_ms": 4.1,
+    "p95_ms": 6.1,
+    "max_ms": 6.3
    },
    "neighbors": {
     "runs": 30,
-    "median_ms": 2.8,
-    "p95_ms": 3.4,
-    "max_ms": 4.0
+    "median_ms": 3.2,
+    "p95_ms": 4.0,
+    "max_ms": 4.5
    },
    "graph_default": {
     "runs": 30,
-    "median_ms": 5.8,
-    "p95_ms": 7.8,
-    "max_ms": 8.0
+    "median_ms": 13.0,
+    "p95_ms": 16.1,
+    "max_ms": 20.1
    },
    "graph_focus": {
     "runs": 30,
-    "median_ms": 2.8,
-    "p95_ms": 3.3,
-    "max_ms": 3.5
+    "median_ms": 5.1,
+    "p95_ms": 7.9,
+    "max_ms": 8.3
    },
    "graph_search": {
     "runs": 30,
-    "median_ms": 16.3,
-    "p95_ms": 21.3,
-    "max_ms": 39.4
+    "median_ms": 18.3,
+    "p95_ms": 34.0,
+    "max_ms": 35.3
    },
    "short_term_body_scan": {
     "runs": 30,
     "median_ms": 0.1,
     "p95_ms": 0.2,
-    "max_ms": 0.4
+    "max_ms": 0.2
    },
    "http_graph": {
     "runs": 30,
-    "median_ms": 7.6,
-    "p95_ms": 35.8,
-    "max_ms": 38.6
+    "median_ms": 18.5,
+    "p95_ms": 37.2,
+    "max_ms": 39.2
+   },
+   "http_pages_first": {
+    "runs": 30,
+    "median_ms": 9.3,
+    "p95_ms": 32.2,
+    "max_ms": 32.7
+   },
+   "http_pages_filtered_page": {
+    "runs": 30,
+    "median_ms": 8.0,
+    "p95_ms": 29.7,
+    "max_ms": 32.1
+   },
+   "http_sessions": {
+    "runs": 30,
+    "median_ms": 10.3,
+    "p95_ms": 30.1,
+    "max_ms": 31.7
+   },
+   "http_session_detail": {
+    "runs": 30,
+    "median_ms": 9.5,
+    "p95_ms": 33.4,
+    "max_ms": 33.5
+   },
+   "http_sources": {
+    "runs": 30,
+    "median_ms": 4.7,
+    "p95_ms": 20.1,
+    "max_ms": 26.6
+   },
+   "http_source_detail": {
+    "runs": 30,
+    "median_ms": 5.7,
+    "p95_ms": 26.1,
+    "max_ms": 29.8
+   },
+   "http_object_detail": {
+    "runs": 30,
+    "median_ms": 12.0,
+    "p95_ms": 31.6,
+    "max_ms": 34.6
+   },
+   "http_graph_all": {
+    "runs": 30,
+    "median_ms": 12.7,
+    "p95_ms": 29.7,
+    "max_ms": 30.9
+   },
+   "http_settings": {
+    "runs": 30,
+    "median_ms": 1.9,
+    "p95_ms": 25.2,
+    "max_ms": 26.2
+   },
+   "browser_document_ready": {
+    "runs": 30,
+    "median_ms": 114.7,
+    "p95_ms": 167.9,
+    "max_ms": 207.0,
+    "nodes_drawn": 3
    },
    "browser_graph_ready": {
     "runs": 30,
-    "median_ms": 323.0,
-    "p95_ms": 365.7,
-    "max_ms": 375.0,
-    "nodes_drawn": 100
+    "median_ms": 516.7,
+    "p95_ms": 585.0,
+    "max_ms": 622.5,
+    "nodes_drawn": 103
    }
   },
   "1000": {
    "build": {
     "pages": 1000,
-    "build_seconds": 1.1
+    "indexes": 22,
+    "build_seconds": 1.3
    },
-   "store_bytes": 14827520,
+   "store_bytes": 15040512,
    "query": {
     "runs": 30,
-    "median_ms": 48.5,
-    "p95_ms": 106.1,
-    "max_ms": 109.9
+    "median_ms": 70.8,
+    "p95_ms": 161.3,
+    "max_ms": 166.3
    },
    "read_render": {
     "runs": 30,
-    "median_ms": 3.1,
-    "p95_ms": 3.6,
-    "max_ms": 4.1
+    "median_ms": 6.3,
+    "p95_ms": 7.7,
+    "max_ms": 8.6
    },
    "neighbors": {
     "runs": 30,
-    "median_ms": 2.8,
-    "p95_ms": 3.4,
-    "max_ms": 3.5
+    "median_ms": 3.4,
+    "p95_ms": 5.9,
+    "max_ms": 6.5
    },
    "graph_default": {
     "runs": 30,
-    "median_ms": 17.2,
-    "p95_ms": 19.4,
-    "max_ms": 19.4
+    "median_ms": 31.8,
+    "p95_ms": 41.9,
+    "max_ms": 42.2
    },
    "graph_focus": {
     "runs": 30,
-    "median_ms": 3.0,
-    "p95_ms": 3.7,
-    "max_ms": 3.8
+    "median_ms": 8.4,
+    "p95_ms": 11.9,
+    "max_ms": 13.1
    },
    "graph_search": {
     "runs": 30,
-    "median_ms": 48.0,
-    "p95_ms": 54.4,
-    "max_ms": 56.8
+    "median_ms": 57.0,
+    "p95_ms": 105.1,
+    "max_ms": 139.8
    },
    "short_term_body_scan": {
     "runs": 30,
-    "median_ms": 2.4,
-    "p95_ms": 3.2,
-    "max_ms": 3.3
+    "median_ms": 2.7,
+    "p95_ms": 4.4,
+    "max_ms": 5.1
    },
    "http_graph": {
     "runs": 30,
-    "median_ms": 19.7,
-    "p95_ms": 41.2,
-    "max_ms": 44.9
+    "median_ms": 29.8,
+    "p95_ms": 57.8,
+    "max_ms": 58.4
+   },
+   "http_pages_first": {
+    "runs": 30,
+    "median_ms": 17.3,
+    "p95_ms": 34.9,
+    "max_ms": 37.1
+   },
+   "http_pages_filtered_page": {
+    "runs": 30,
+    "median_ms": 13.6,
+    "p95_ms": 36.9,
+    "max_ms": 39.8
+   },
+   "http_sessions": {
+    "runs": 30,
+    "median_ms": 15.0,
+    "p95_ms": 36.9,
+    "max_ms": 41.2
+   },
+   "http_session_detail": {
+    "runs": 30,
+    "median_ms": 10.3,
+    "p95_ms": 30.3,
+    "max_ms": 31.9
+   },
+   "http_sources": {
+    "runs": 30,
+    "median_ms": 16.3,
+    "p95_ms": 35.5,
+    "max_ms": 37.4
+   },
+   "http_source_detail": {
+    "runs": 30,
+    "median_ms": 11.4,
+    "p95_ms": 34.5,
+    "max_ms": 37.0
+   },
+   "http_object_detail": {
+    "runs": 30,
+    "median_ms": 27.0,
+    "p95_ms": 39.5,
+    "max_ms": 43.4
+   },
+   "http_graph_all": {
+    "runs": 30,
+    "median_ms": 30.4,
+    "p95_ms": 48.5,
+    "max_ms": 58.8
+   },
+   "http_settings": {
+    "runs": 30,
+    "median_ms": 1.7,
+    "p95_ms": 22.3,
+    "max_ms": 27.1
+   },
+   "browser_document_ready": {
+    "runs": 30,
+    "median_ms": 137.1,
+    "p95_ms": 167.1,
+    "max_ms": 168.0,
+    "nodes_drawn": 3
    },
    "browser_graph_ready": {
     "runs": 30,
-    "median_ms": 546.7,
-    "p95_ms": 692.0,
-    "max_ms": 717.4,
+    "median_ms": 870.4,
+    "p95_ms": 1019.4,
+    "max_ms": 1055.4,
     "nodes_drawn": 150
    }
   },
   "10000": {
    "build": {
     "pages": 10000,
-    "build_seconds": 19.2
+    "indexes": 220,
+    "build_seconds": 29.5
    },
-   "store_bytes": 144961536,
+   "store_bytes": 147951616,
    "query": {
     "runs": 30,
-    "median_ms": 124.2,
-    "p95_ms": 250.9,
-    "max_ms": 251.0
+    "median_ms": 149.4,
+    "p95_ms": 244.9,
+    "max_ms": 269.6
    },
    "read_render": {
     "runs": 30,
-    "median_ms": 4.1,
-    "p95_ms": 5.0,
-    "max_ms": 5.4
+    "median_ms": 10.6,
+    "p95_ms": 13.5,
+    "max_ms": 14.2
    },
    "neighbors": {
     "runs": 30,
-    "median_ms": 3.4,
-    "p95_ms": 4.9,
-    "max_ms": 5.0
+    "median_ms": 6.3,
+    "p95_ms": 9.1,
+    "max_ms": 9.3
    },
    "graph_default": {
     "runs": 30,
-    "median_ms": 38.7,
-    "p95_ms": 54.3,
-    "max_ms": 56.4
+    "median_ms": 55.8,
+    "p95_ms": 79.5,
+    "max_ms": 81.2
    },
    "graph_focus": {
     "runs": 30,
-    "median_ms": 8.9,
-    "p95_ms": 14.2,
-    "max_ms": 17.6
+    "median_ms": 12.2,
+    "p95_ms": 14.4,
+    "max_ms": 14.4
    },
    "graph_search": {
     "runs": 30,
-    "median_ms": 120.3,
-    "p95_ms": 200.3,
-    "max_ms": 210.2
+    "median_ms": 140.3,
+    "p95_ms": 233.2,
+    "max_ms": 310.6
    },
    "short_term_body_scan": {
     "runs": 30,
-    "median_ms": 50.0,
-    "p95_ms": 69.3,
-    "max_ms": 69.4
+    "median_ms": 32.2,
+    "p95_ms": 71.8,
+    "max_ms": 83.3
    },
    "http_graph": {
     "runs": 30,
-    "median_ms": 41.4,
-    "p95_ms": 72.4,
-    "max_ms": 73.2
+    "median_ms": 75.3,
+    "p95_ms": 101.1,
+    "max_ms": 105.6
+   },
+   "http_pages_first": {
+    "runs": 30,
+    "median_ms": 127.0,
+    "p95_ms": 153.7,
+    "max_ms": 158.8
+   },
+   "http_pages_filtered_page": {
+    "runs": 30,
+    "median_ms": 134.0,
+    "p95_ms": 158.6,
+    "max_ms": 164.9
+   },
+   "http_sessions": {
+    "runs": 30,
+    "median_ms": 120.1,
+    "p95_ms": 141.6,
+    "max_ms": 141.8
+   },
+   "http_session_detail": {
+    "runs": 30,
+    "median_ms": 22.0,
+    "p95_ms": 40.6,
+    "max_ms": 43.3
+   },
+   "http_sources": {
+    "runs": 30,
+    "median_ms": 176.8,
+    "p95_ms": 223.9,
+    "max_ms": 224.9
+   },
+   "http_source_detail": {
+    "runs": 30,
+    "median_ms": 40.8,
+    "p95_ms": 60.4,
+    "max_ms": 60.7
+   },
+   "http_object_detail": {
+    "runs": 30,
+    "median_ms": 76.7,
+    "p95_ms": 102.1,
+    "max_ms": 111.4
+   },
+   "http_graph_all": {
+    "runs": 30,
+    "median_ms": 98.7,
+    "p95_ms": 151.8,
+    "max_ms": 170.3
+   },
+   "http_settings": {
+    "runs": 30,
+    "median_ms": 3.5,
+    "p95_ms": 26.2,
+    "max_ms": 26.8
+   },
+   "browser_document_ready": {
+    "runs": 30,
+    "median_ms": 319.2,
+    "p95_ms": 401.2,
+    "max_ms": 417.8,
+    "nodes_drawn": 3
    },
    "browser_graph_ready": {
     "runs": 30,
-    "median_ms": 839.7,
-    "p95_ms": 1006.8,
-    "max_ms": 1128.8,
+    "median_ms": 1030.9,
+    "p95_ms": 1246.5,
+    "max_ms": 1281.2,
     "nodes_drawn": 150
    }
   }
