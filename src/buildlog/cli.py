@@ -133,6 +133,18 @@ def build_parser() -> argparse.ArgumentParser:
     fb_status = feedback_sub.add_parser("status")
     fb_status.add_argument("feedback_id")
     fb_status.add_argument("status", choices=("open", "addressed", "dismissed"))
+    export_parser = commands.add_parser("export", help="write pages as Markdown plus manifest.json from one consistent snapshot")
+    export_parser.add_argument("--out", required=True)
+    export_parser.add_argument("--page", dest="page_ids", action="append", help="export only these pages and what belongs to them")
+    export_parser.add_argument("--force", action="store_true", help="replace an earlier export in the same folder")
+    import_parser = commands.add_parser("import", help="import an export folder (UUID-matched, version-checked, one transaction)")
+    import_parser.add_argument("--in", dest="in_dir", required=True)
+    import_parser.add_argument("--dry-run", action="store_true")
+    backup_parser = commands.add_parser("backup", help="consistent copy of the store, integrity-checked")
+    backup_parser.add_argument("--out", required=True)
+    backup_parser.add_argument("--force", action="store_true")
+    restore_parser = commands.add_parser("restore", help="replace the store with a backup (the current store is saved first)")
+    restore_parser.add_argument("--from", dest="source", required=True)
     merge_parser = commands.add_parser("merge", help="merge duplicate pages into one representative page")
     merge_parser.add_argument("target_id")
     merge_parser.add_argument("source_ids", nargs="+")
@@ -252,6 +264,18 @@ def main(argv: list[str] | None = None) -> int:
                 data = list_feedback(store, args.target, args.status)
             else:
                 data = set_feedback_status(store, args.feedback_id, args.status)
+            warnings = []
+        elif args.command in {"export", "import", "backup", "restore"}:
+            from . import portability
+
+            if args.command == "export":
+                data = portability.export(store, Path(args.out).expanduser(), args.page_ids, args.force)
+            elif args.command == "import":
+                data = portability.import_export(store, Path(args.in_dir).expanduser(), args.dry_run)
+            elif args.command == "backup":
+                data = portability.backup(store, Path(args.out).expanduser(), args.force)
+            else:
+                data = portability.restore(store, Path(args.source).expanduser())
             warnings = []
         elif args.command == "merge":
             from .update import merge_pages
