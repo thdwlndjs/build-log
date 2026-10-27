@@ -9,7 +9,7 @@ from typing import Any
 
 from . import db
 from .db import NotFoundError, ValidationError
-from .read import read_object, render_markdown
+from .read import read_object, render_document, render_markdown
 
 DEFAULT_NODES, DEFAULT_EDGES = 150, 300
 MAX_NODES, MAX_EDGES = 500, 1000
@@ -171,4 +171,5 @@ def object_detail(store: Path, object_id: str) -> dict[str, Any]:
             """SELECT r.from_page_id AS id, p.title, r.merged_at FROM page_redirects r JOIN pages p ON p.id = r.from_page_id
                WHERE r.to_page_id = ?""", (obj_id,))] if kind == "page" else []
     return {"object_type": kind, "id": obj_id, "record": record, "markdown": render_markdown(record),
+            "document_md": render_document(record) if kind == "page" else None,
             "revisions": revisions, "feedback": feedback, "merged_from": merged_from}

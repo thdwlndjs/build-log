@@ -23,14 +23,14 @@ def _rows(c: sqlite3.Connection, sql: str, args: tuple[Any, ...]) -> list[dict[s
 
 
 def _page_evidence(c: sqlite3.Connection, page_id: str) -> list[dict[str, Any]]:
-    return _rows(c, """SELECT s.kind, s.locator, e.id AS evidence_id, e.section_locator, e.excerpt, e.evidence_kind,
+    return _rows(c, """SELECT s.kind, s.locator, s.id AS source_id, e.id AS evidence_id, e.section_locator, e.excerpt, e.evidence_kind,
                               e.start_line, e.end_line, s.metadata_json AS source_meta
                        FROM page_sources ps JOIN evidence e ON e.id = ps.evidence_id JOIN sources s ON s.id = e.source_id
                        WHERE ps.page_id = ? ORDER BY e.rowid""", (page_id,))
 
 
 def _object_evidence(c: sqlite3.Connection, object_type: str, object_id: str) -> list[dict[str, Any]]:
-    return _rows(c, """SELECT s.kind, s.locator, e.id AS evidence_id, e.section_locator, e.excerpt, e.evidence_kind,
+    return _rows(c, """SELECT s.kind, s.locator, s.id AS source_id, e.id AS evidence_id, e.section_locator, e.excerpt, e.evidence_kind,
                               e.start_line, e.end_line, s.metadata_json AS source_meta
                        FROM object_evidence oe JOIN evidence e ON e.id = oe.evidence_id JOIN sources s ON s.id = e.source_id
                        WHERE oe.object_type = ? AND oe.object_id = ? ORDER BY e.rowid""", (object_type, object_id))
@@ -300,33 +300,16 @@ def _render_page(record: dict[str, Any], include_rules: bool = True) -> list[str
     # Schema pages often have only the source description; do not print it twice.
     if page["body_md"].strip() != page["summary_md"].strip():
         lines += ["", "## 기록", "", page["body_md"]]
-    sections: list[list[str]] = []
-    if record.get("schema_object"):
-        sections.append(_render_schema(record["schema_object"]))
-    if include_rules and record.get("rules"):
-        sections.append(_render_rules(record["rules"]))
-    if record.get("terms"):
-        sections.append(_render_terms(record["terms"]))
-    if record.get("join_paths"):
-        sections.append(_render_join_paths(record["join_paths"]))
+    sections = _knowledge_sections(record, include_rules)
     relations = record.get("relations") or {"outgoing": [], "incoming": []}
     if relations["outgoing"] or relations["incoming"]:
         sections.append(_render_relations(relations))
     index = record.get("index") or {"children": [], "parents": []}
     if index["children"]:
         sections.append(["## 목차", ""] + [f"{c['position']}. {c['title']} (`{c['id']}`)" for c in index["children"]])
-    research = record.get("research") or []
+    research = _research_section(record)
     if research:
-        labels = {"pending": "대기", "running": "진행 중 또는 중단됨", "succeeded": "완료", "failed": "실패"}
-        block = ["## 외부 조사", ""]
-        for r in research:
-            line = f"- {r['question']} · {labels.get(r['status'], r['status'])} · 시도 {r['attempts']}회 · `{r['id']}`"
-            if r["status"] == "failed":
-                line += f" · 원인({r['error_kind']}): {_excerpt(r['last_error'] or '', 200)}"
-            block.append(line)
-        if any(r["status"] != "succeeded" for r in research):
-            block += ["", "끝나지 않은 조사가 있다. 이 기록의 근거는 아직 보강 전이며 `buildlog research --page <id>`로 재개한다."]
-        sections.append(block)
+        sections.append(research)
     if index["parents"]:
         sections.append(["## 상위 목차", ""] + [f"- {p['title']} (`{p['id']}`)" for p in index["parents"]])
     if record["evidence"]:
@@ -340,6 +323,51 @@ def _render_page(record: dict[str, Any], include_rules: bool = True) -> list[str
     for section in sections:
         lines += [""] + section
     return lines
+
+
+def _knowledge_sections(record: dict[str, Any], include_rules: bool = True) -> list[list[str]]:
+    sections: list[list[str]] = []
+    if record.get("schema_object"):
+        sections.append(_render_schema(record["schema_object"]))
+    if include_rules and record.get("rules"):
+        sections.append(_render_rules(record["rules"]))
+    if record.get("terms"):
+        sections.append(_render_terms(record["terms"]))
+    if record.get("join_paths"):
+        sections.append(_render_join_paths(record["join_paths"]))
+    return sections
+
+
+def _research_section(record: dict[str, Any]) -> list[str]:
+    research = record.get("research") or []
+    if not research:
+        return []
+    labels = {"pending": "대기", "running": "진행 중 또는 중단됨", "succeeded": "완료", "failed": "실패"}
+    block = ["## 외부 조사", ""]
+    for r in research:
+        line = f"- {r['question']} · {labels.get(r['status'], r['status'])} · 시도 {r['attempts']}회 · `{r['id']}`"
+        if r["status"] == "failed":
+            line += f" · 원인({r['error_kind']}): {_excerpt(r['last_error'] or '', 200)}"
+        block.append(line)
+    if any(r["status"] != "succeeded" for r in research):
+        block += ["", "끝나지 않은 조사가 있다. 이 기록의 근거는 아직 보강 전이며 `buildlog research --page <id>`로 재개한다."]
+    return block
+
+
+def render_document(record: dict[str, Any]) -> str:
+    """The page's own content for the workspace document area: body, structure, rules, terms, join
+    paths and research. Title, summary, relations, index and evidence are shown there separately."""
+    page = record["page"]
+    lines: list[str] = []
+    if page["body_md"].strip() != page["summary_md"].strip():
+        lines.append(page["body_md"])
+    sections = _knowledge_sections(record)
+    research = _research_section(record)
+    if research:
+        sections.append(research)
+    for section in sections:
+        lines += ([""] if lines else []) + section
+    return "\n".join(lines).strip() + "\n" if lines else ""
 
 
 def render_markdown(record: dict[str, Any]) -> str:

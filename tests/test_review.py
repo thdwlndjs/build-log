@@ -244,8 +244,42 @@ class ServerTests(Base):
         html = raw.decode("utf-8")
         self.assertIn(self.server.token, html)
         self.assertNotIn("https://", html)  # no CDN: every asset is local
-        for asset in ("app.js", "app.css", "vendor/cytoscape-3.30.2.min.js", "vendor/marked-12.0.2.min.js", "vendor/purify-3.1.6.min.js"):
+        for asset in ("app.js", "app.css", "vendor/cytoscape-3.30.2.min.js", "vendor/marked-12.0.2.min.js", "vendor/purify-3.1.6.min.js",
+                      "vendor/lucide-0.460.0.svg"):
             self.assertEqual(self.call("GET", f"/static/{asset}")[0], 200, asset)
+
+
+class WorkspaceDetailTests(Base):
+    """The workspace shows title, summary, relations, index and evidence in their own places (spec §10.2);
+    document_md carries the rest, and the CLI Markdown keeps everything."""
+
+    def test_document_markdown_holds_the_page_content(self) -> None:
+        table = self.page("equipment (demo_mes)")
+        _, detail = self.call("GET", f"/api/objects/{table['id']}")
+        doc = detail["document_md"]
+        for kept in ("## 테이블 구조", "capacity_kw", "## 필수 조건·금칙·미지원 연산"):
+            self.assertIn(kept, doc)
+        for elsewhere in ("# equipment (demo_mes)", "## 요약", "## 관계", "## 상위 목차", "## 근거"):
+            self.assertNotIn(elsewhere, doc)
+        for kept in ("# equipment (demo_mes)", "## 요약", "## 테이블 구조", "## 상위 목차"):
+            self.assertIn(kept, detail["markdown"])
+        evidence = detail["record"]["evidence"]
+        self.assertTrue(evidence and all(e["source_id"] for e in evidence))
+        relation = self.q("SELECT id FROM relations LIMIT 1")[0]["id"]
+        self.assertIsNone(self.call("GET", f"/api/objects/{relation}")[1]["document_md"])
+
+    def call(self, method: str, path: str) -> tuple[int, Any]:
+        server = start_in_thread(self.store)
+        try:
+            conn = HTTPConnection("127.0.0.1", server.port, timeout=10)
+            conn.request(method, path, headers={"Host": f"127.0.0.1:{server.port}"})
+            response = conn.getresponse()
+            body = json.loads(response.read())
+            conn.close()
+            return response.status, body
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 class ServeProcessTests(unittest.TestCase):
