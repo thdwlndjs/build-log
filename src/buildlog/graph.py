@@ -64,7 +64,9 @@ def list_runs(store: Path, limit: int = 30) -> dict[str, Any]:
 
 def graph(store: Path, run_id: str | None = None, focus: str | None = None, q: str | None = None,
           types: list[str] | None = None, include_columns: bool = False,
-          cap_nodes: int = DEFAULT_NODES, cap_edges: int = DEFAULT_EDGES) -> dict[str, Any]:
+          cap_nodes: int = DEFAULT_NODES, cap_edges: int = DEFAULT_EDGES, everything: bool = False) -> dict[str, Any]:
+    """Pages and their links for the graph view. `everything` shows the whole store, most recently changed
+    first, up to the node cap (spec §10.1 mode=all); otherwise a run, a page's neighbours, or a search."""
     if not (1 <= cap_nodes <= MAX_NODES) or not (1 <= cap_edges <= MAX_EDGES):
         raise ValidationError(f"cap_nodes must be 1..{MAX_NODES} and cap_edges 1..{MAX_EDGES}")
     if not store.exists():
@@ -74,7 +76,9 @@ def graph(store: Path, run_id: str | None = None, focus: str | None = None, q: s
     flags: dict[str, str] = {}
     with closing(db.connect(store)) as c:
         redirected = _redirected(c)
-        if focus:
+        if everything:
+            seeds, mode = [], "all"
+        elif focus:
             page = c.execute("SELECT id FROM pages WHERE id = ?", (focus,)).fetchone()
             if page is None:
                 raise NotFoundError(f"page not found: {focus}")
@@ -106,7 +110,7 @@ def graph(store: Path, run_id: str | None = None, focus: str | None = None, q: s
                     FROM pages p LEFT JOIN schema_objects so ON so.page_id = p.id WHERE p.id IN ({marks})""", ids)}
 
         neighbor_ids: list[str] = []
-        if seeds:
+        if seeds and not everything:
             marks = ",".join("?" * len(seeds))
             for r in c.execute(f"""SELECT source_id, target_id FROM relations WHERE removed_at IS NULL
                                    AND (source_id IN ({marks}) OR target_id IN ({marks}))""", (*seeds, *seeds)):
@@ -114,22 +118,37 @@ def graph(store: Path, run_id: str | None = None, focus: str | None = None, q: s
             for r in c.execute(f"""SELECT index_page_id, child_page_id FROM index_members
                                    WHERE index_page_id IN ({marks}) OR child_page_id IN ({marks})""", (*seeds, *seeds)):
                 neighbor_ids += [r["index_page_id"], r["child_page_id"]]
-        ordered = list(dict.fromkeys([*seeds, *neighbor_ids]))
-        rows = page_rows(ordered)
         seed_set = set(seeds)
         kept = []
-        for page_id in ordered:
-            row = rows.get(page_id)
-            if row is None or page_id in redirected:
-                continue
-            if page_id not in seed_set:
-                if row["type"] == "schema_column" and not include_columns:
+        if everything:
+            where = ["p.id NOT IN (SELECT from_page_id FROM page_redirects)"]
+            args: list[Any] = []
+            if not include_columns:
+                where.append("p.type != 'schema_column'")
+            if types:
+                where.append(f"p.type IN ({','.join('?' * len(types))})")
+                args += types
+            condition = " AND ".join(where)
+            total = c.execute(f"SELECT COUNT(*) FROM pages p WHERE {condition}", args).fetchone()[0]
+            kept = c.execute(f"""SELECT p.id, p.title, p.type, p.status, p.version, p.summary_dirty, so.system_key
+                                 FROM pages p LEFT JOIN schema_objects so ON so.page_id = p.id WHERE {condition}
+                                 ORDER BY p.updated_at DESC, p.rowid DESC LIMIT ?""", (*args, cap_nodes)).fetchall()
+            dropped_nodes = total - len(kept)
+        else:
+            ordered = list(dict.fromkeys([*seeds, *neighbor_ids]))
+            rows = page_rows(ordered)
+            for page_id in ordered:
+                row = rows.get(page_id)
+                if row is None or page_id in redirected:
                     continue
-                if types and row["type"] not in types:
-                    continue
-            kept.append(row)
-        dropped_nodes = max(0, len(kept) - cap_nodes)
-        kept = kept[:cap_nodes]
+                if page_id not in seed_set:
+                    if row["type"] == "schema_column" and not include_columns:
+                        continue
+                    if types and row["type"] not in types:
+                        continue
+                kept.append(row)
+            dropped_nodes = max(0, len(kept) - cap_nodes)
+            kept = kept[:cap_nodes]
         node_ids = {r["id"] for r in kept}
         nodes = [{"id": r["id"], "title": r["title"], "type": r["type"], "status": r["status"], "version": r["version"],
                   "summary_dirty": bool(r["summary_dirty"]), "system_key": r["system_key"], "seed": r["id"] in seed_set,

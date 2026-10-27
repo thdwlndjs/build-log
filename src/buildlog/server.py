@@ -207,8 +207,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/graph":
                 caps = {k: int(params[k]) for k in ("cap_nodes", "cap_edges") if params.get(k, "").isdigit()}
                 types = [t for t in params.get("types", "").split(",") if t] or None
+                mode = params.get("mode") or ""
+                if mode not in ("", "all"):
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "mode must be all, or left out")
                 return graph(store, run_id=params.get("run") or None, focus=params.get("focus") or None,
-                             q=params.get("q") or None, types=types, include_columns=params.get("columns") == "1", **caps)
+                             q=params.get("q") or None, types=types, include_columns=params.get("columns") == "1",
+                             everything=mode == "all", **caps)
+            if path == "/api/settings":
+                # Read only: what this server uses, and the shared setting the CLI and both hosts use.
+                from . import config
+
+                shared = config.show()
+                return {"store": str(store), "schema_version": db.SCHEMA_VERSION, "order": shared["order"],
+                        "config": {"file": shared["config_file"],
+                                   "store": {"value": shared["store"]["value"], "origin": shared["store"]["from"]},
+                                   "agy": {"value": shared["agy"]["value"], "origin": shared["agy"]["from"]}}}
             if path == "/api/runs":
                 return list_runs(store)
             if path == "/api/search":

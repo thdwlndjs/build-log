@@ -1,6 +1,5 @@
 """Phase 5 contract: read-only APIs for the workspace screen. spec §10.1 and §10.3.
 
-PENDING marks contracts not implemented yet; remove it in the step that implements them.
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ from buildlog.server import start_in_thread
 from buildlog.store import ingest
 from buildlog.update import merge_pages
 
-PENDING = unittest.expectedFailure  # Phase 5-5 (settings, graph mode=all)
 
 GUIDE = "# 빌드 가이드\n\n캐시는 매일 지운다.\n"
 DDL = """CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
@@ -220,7 +218,6 @@ class BrowseApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------ /api/settings, /api/graph?mode=all
 
-    @PENDING
     def test_settings_are_read_only_and_carry_no_token(self) -> None:
         status, data, raw = self.get("/api/settings")
         self.assertEqual(status, 200, raw[:300])
@@ -230,7 +227,6 @@ class BrowseApiTests(unittest.TestCase):
         self.assertEqual(set(data["config"]["agy"]), {"value", "origin"})
         self.assertNotIn(self.server.token.encode(), raw)
 
-    @PENDING
     def test_graph_all_mode(self) -> None:
         data = self.ok("/api/graph?mode=all")
         self.assertEqual(data["mode"], "all")

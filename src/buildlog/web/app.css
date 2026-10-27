@@ -50,6 +50,12 @@ body { background: light-dark(#fff, #202326); }
 #workbench .w-evidence .w-inline-link { padding: 0 0 3px; }
 #workbench .w-evidence .w-muted { overflow-wrap: anywhere; }
 
+/* Whole graph and read-only settings. */
+#workbench .w-flat { display: flex; flex-direction: column; }
+#workbench .w-global { flex: 1 1 auto; min-height: 420px; overflow: hidden; }
+#workbench .w-preview h2 { overflow-wrap: anywhere; }
+#workbench dl.w-config { grid-template-columns: 130px minmax(0, 1fr); font-size: 12px; max-width: 760px; }
+
 /* Status messages. */
 #workbench [data-status].is-ok { color: var(--w-accent); }
 #workbench [data-status].is-error { color: light-dark(#b3261e, #ff8a80); font-weight: 600; }

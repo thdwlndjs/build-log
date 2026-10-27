@@ -241,17 +241,45 @@ class WorkspaceEndToEnd(unittest.TestCase):
         self.page.click("button[data-toggle-context]")
         expect(self.page.locator("#local-graph")).to_be_visible()
 
-    def test_screens_of_later_steps_say_so_and_tabs_close(self) -> None:
+    # ------------------------------------------------------------ Phase 5-5: whole graph, ?run= link, settings
+
+    def test_whole_graph_select_a_node_and_open_it(self) -> None:
         self.open_doc("빌드 목차")
         self.page.click("button.l-graph-entry")
-        expect(self.page.locator(".w-content > .w-empty")).to_contain_text("5-5")
-        self.page.click("button[data-settings]")
-        expect(self.page.locator(".w-content > .w-empty")).to_contain_text("5-5")
+        expect(self.page.locator(".w-tab.active")).to_contain_text("전체 그래프")
+        shown = self.q("SELECT COUNT(*) FROM pages WHERE type != 'schema_column'")[0][0]
+        self.wait_until("n => !!window.buildlogGraphCy && window.buildlogGraphCy.nodes().length === n", shown)
+        concept = self.page_id("빌드 캐시")
+        self.page.evaluate(f"window.buildlogGraphCy.getElementById('{concept}').emit('tap')")
+        expect(self.page.locator("#preview-title")).to_have_text("빌드 캐시")
+        expect(self.page.locator(".w-preview")).to_contain_text("개념")
+        self.page.click("button[data-open-selected]")
+        self.expect_doc("빌드 캐시")
         expect(self.page.locator(".w-tab")).to_have_count(3)
         self.page.locator(".w-tab", has_text="전체 그래프").locator("button[data-close]").click()
         expect(self.page.locator(".w-tab")).to_have_count(2)
-        self.goto(f"?run={self.dup_run['run_id']}")                              # the link a save hands out
+
+    def test_run_link_from_a_save_shows_that_save(self) -> None:
+        self.goto(f"?run={self.dup_run['run_id']}")                              # the link `ingest` hands out
         expect(self.page.locator(".w-tab.active")).to_contain_text("전체 그래프")
+        expect(self.page.locator("[data-graph-note]")).to_contain_text("test:duplicates")
+        self.wait_until("() => !!window.buildlogGraphCy && window.buildlogGraphCy.nodes('.flagged').length === 4")
+        ids = set(self.page.evaluate("window.buildlogGraphCy.nodes('.flagged').map(n => n.id())"))
+        self.assertEqual(ids, {r["id"] for r in self.dup_run["created"]["pages"]})
+        self.page.click("button.l-graph-entry")                                   # back to the whole store
+        expect(self.page.locator("[data-graph-note]")).not_to_contain_text("test:duplicates")
+        self.assertNotIn("run=", self.page.url)
+
+    def test_settings_are_shown_read_only(self) -> None:
+        self.open_doc("빌드 목차")
+        self.page.click("button[data-settings]")
+        config = self.page.locator("dl.w-config")
+        expect(config).to_contain_text(str(self.store))
+        expect(config).to_contain_text("스키마 버전")
+        self.assertEqual(self.page.locator(".w-flat input, .w-flat textarea, .w-flat select").count(), 0)
+        self.assertNotIn(self.server.token, self.page.locator(".w-content").inner_text())
+        expect(self.page.locator(".w-context")).to_have_count(0)                 # as in the reference, no side panel
+        self.expect_status("설정 · 읽기 전용")
 
     # ------------------------------------------------------------ Phase 5-4: explorer, list, search, sources
 

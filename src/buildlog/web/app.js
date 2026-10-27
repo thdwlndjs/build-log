@@ -17,8 +17,7 @@
   const PARSE_LABEL = { complete: '전부 읽음', partial: '일부만 읽음' };
   const LIST_FILTERS = [['전체', null], ['경험', 'experience'], ['개념', 'concept'], ['방법', 'method'], ['테이블', 'schema_table'], ['목차', 'index']];
   const SPECIAL = { list: '전체 문서', graph: '전체 그래프', settings: '설정' };
-  // Screens that exist in the reference but are connected to the store in a later step of plan.md Phase 5.
-  const LATER = { graph: '5-5', settings: '5-5' };
+  const ORIGIN_LABEL = { option: '명령 옵션', default: '기본값' };
   const TAB_RE = /^(?:(?:doc|session|source):[0-9A-Za-z-]{1,80}|list|graph|settings)$/;
   const STORAGE_KEY = `buildlog.workbench:${STORE}`;
 
@@ -165,7 +164,7 @@
 
   function tabFromUrl() {
     const params = new URLSearchParams(location.search);
-    if (params.get('run')) state.run = params.get('run');
+    state.run = params.get('run') || null;
     const tab = params.get('tab');
     if (tab) return TAB_RE.test(tab) ? tab : null;
     const older = params.get('open') || params.get('focus');      // older review links
@@ -196,6 +195,8 @@
     else if (screen === 'session') await loadSession(objectOf(id));
     else if (screen === 'source') await loadSource(objectOf(id));
     else if (screen === 'list' && !listView.loaded) await loadList(listView.type);
+    else if (screen === 'graph') await loadGlobalGraph();
+    else if (screen === 'settings') await loadSettings();
   }
 
   function closeTab(id) {
@@ -351,6 +352,7 @@
     updateStatus();
     searchDialog();
     if (screen === 'document') drawLocalGraph(); else destroyLocalGraph();
+    if (screen === 'graph') drawGlobalGraph(); else destroyGlobalGraph();
   }
 
   function sidebar() {
@@ -416,7 +418,7 @@
 
   function tabstrip() {
     return el('nav', { class: 'w-tabs', 'aria-label': '본 작업 영역의 열린 탭' },
-      el('button', { type: 'button', class: 'l-graph-entry', 'data-graph': true, 'aria-label': '전체 그래프 열기', onclick: () => openTab('graph') }, icon('network')),
+      el('button', { type: 'button', class: 'l-graph-entry', 'data-graph': true, 'aria-label': '전체 그래프 열기', onclick: () => openGraph(null) }, icon('network')),
       state.tabs.map(t => el('div', { class: `w-tab${t.id === state.active ? ' active' : ''}`, 'data-tab-id': t.id },
         el('button', { type: 'button', class: 'w-tab-title', 'data-editor-tab': t.id, onclick: () => openTab(t.id) }, icon(tabIcon(t.id)), el('span', {}, tabTitle(t))),
         el('button', { type: 'button', class: 'w-close', 'data-close': t.id, 'aria-label': `${tabTitle(t)} 탭 닫기`, onclick: () => closeTab(t.id) }, '×'))));
@@ -427,7 +429,7 @@
     const tab = state.tabs.find(t => t.id === state.active);
     const label = {
       document: `문서 / ${detail ? titleOf(detail) : '불러오는 중'}`,
-      graph: '그래프 / 전체 지식', list: '전체 문서', settings: '설정',
+      graph: state.run ? '그래프 / 저장 실행' : '그래프 / 전체 지식', list: '전체 문서', settings: '설정',
       session: `세션 / ${tab ? tabTitle(tab) : ''}`, source: `소스 / ${tab ? tabTitle(tab) : ''}`,   // the reference's labels
     }[screen] || '작업 영역';
     const actions = [];
@@ -463,9 +465,9 @@
       return el('div', { class: 'w-empty' }, failures.get(id) || '불러오는 중입니다.');
     }
     if (screen === 'list') return documentList();
-    if (screen === 'empty') return el('div', { class: 'w-empty' }, '왼쪽에서 문서나 소스를 선택하세요.');
-    const title = { graph: '전체 그래프', settings: '설정' }[screen];
-    return el('div', { class: 'w-empty' }, el('h1', {}, title), el('p', {}, `이 화면은 Phase ${LATER[screen]}에서 저장소 데이터와 연결합니다.`));
+    if (screen === 'graph') return globalGraphView();
+    if (screen === 'settings') return settingsView();
+    return el('div', { class: 'w-empty' }, '왼쪽에서 문서나 소스를 선택하세요.');
   }
 
   const docRow = d => el('button', { type: 'button', class: 'w-row', 'data-open': d.id, onclick: () => openTab(`doc:${d.id}`) },
@@ -573,6 +575,7 @@
   }
 
   function contextPanel(screen) {
+    if (screen === 'graph') return previewPanel();
     if (screen === 'session' || screen === 'source') {
       const found = (screen === 'session' ? sessions : sources).get(objectOf(state.active));
       if (!found) return el('aside', { class: 'w-context' }, el('div', { class: 'w-empty' }, '불러오는 중입니다.'));
@@ -591,7 +594,7 @@
       return el('aside', { class: 'w-context' }, el('div', { class: 'w-empty' }, screen === 'document' ? '문서를 불러오는 중입니다.' : '이 화면의 속성은 다음 단계에서 연결합니다.'));
     }
     return el('aside', { class: 'w-context' },
-      el('div', { class: 'w-context-top' }, el('span', {}, '주변 연결'), el('button', { type: 'button', 'data-graph': true, onclick: () => openTab('graph') }, '전체 그래프')),
+      el('div', { class: 'w-context-top' }, el('span', {}, '주변 연결'), el('button', { type: 'button', 'data-graph': true, onclick: () => openGraph(null) }, '전체 그래프')),
       el('div', { class: 'w-local w-graph', id: 'local-graph', 'aria-label': '현재 문서 주변 그래프' }),
       detailsPanel(detail));
   }
@@ -694,12 +697,177 @@
       text = `소스 · ${found.kind_label}${found.text === null ? ' · 원문 없음(발췌만 저장됨)' : ''}`;
     } else if (screen === 'list') {
       text = `전체 문서 · ${listView.total}개`;
-    } else if (LATER[screen]) {
-      text = `${SPECIAL[screen]} · Phase ${LATER[screen]}에서 연결 예정`;
+    } else if (screen === 'graph') {
+      const data = globalGraphs.get(graphKey());
+      if (data) {
+        const hidden = data.truncated.nodes ? ` · 표시 한도로 ${data.truncated.nodes}개 생략` : '';
+        text = `그래프 · ${state.run ? '저장 실행' : '전체 지식'} · 문서 ${data.nodes.length}개 표시${hidden}`;
+      }
+    } else if (screen === 'settings') {
+      text = '설정 · 읽기 전용';
     }
     // Pages in no bundle are not hidden: they stay findable and are pointed out until they are put in an index.
     if (lists.unbundled.length) text += ` · 목차에 없는 문서 ${lists.unbundled.length}건`;
     statusBox.textContent = text;
+  }
+
+  // ------------------------------------------------------------ whole graph and settings
+
+  const globalGraphs = new Map();      // 'all' or 'run:<id>' -> /api/graph data
+  const graphPositions = new Map();    // same key -> node positions, so a redraw keeps the layout
+  let globalCy = null;
+  let settings = null;
+
+  const graphKey = () => (state.run ? `run:${state.run}` : 'all');
+
+  // The tab-strip button and "전체 그래프" open the whole store; a save's ?run= link opens that run.
+  function openGraph(run) {
+    state.run = run;
+    state.graphSelected = null;
+    globalGraphs.delete(graphKey());   // show the store as it is now
+    graphPositions.delete(graphKey());
+    if (state.active === 'graph') {
+      history.pushState({ tab: 'graph' }, '', urlFor('graph'));
+      render();
+      loadGlobalGraph();
+    } else {
+      openTab('graph');
+    }
+  }
+
+  async function loadGlobalGraph() {
+    const key = graphKey();
+    if (!globalGraphs.has(key)) {
+      try {
+        const data = await api('GET', state.run ? `/api/graph?run=${encodeURIComponent(state.run)}` : '/api/graph?mode=all');
+        globalGraphs.set(key, data);
+        failures.delete(key);
+        if (!state.graphSelected) state.graphSelected = data.seeds[0] || (data.nodes[0] && data.nodes[0].id) || null;
+      } catch (error) {
+        failures.set(key, error.status === 404 ? '이 저장 실행을 찾을 수 없습니다.' : error.message);
+        report(error);
+      }
+    }
+    if (state.active === 'graph' && graphKey() === key) {
+      render();
+      if (state.graphSelected) selectNode(state.graphSelected);   // fetch its summary for the side panel
+    }
+  }
+
+  function globalGraphView() {
+    const data = globalGraphs.get(graphKey());
+    let note = '문서와 같은 작업 영역에서 연결을 탐색합니다.';
+    if (state.run) note = data && data.run ? `저장 실행 ${data.run.idempotency_key}에서 만들거나 고친 기록과 그 주변입니다.` : '저장 실행의 기록과 그 주변입니다.';
+    if (data && data.truncated.nodes) note += ` 표시 한도로 문서 ${data.truncated.nodes}개를 생략했습니다. 문서 탭의 주변 연결로 이어서 볼 수 있습니다.`;
+    const failure = failures.get(graphKey());
+    return el('div', { class: 'w-flat' }, el('h1', {}, '전체 그래프'), el('div', { class: 'w-muted', 'data-graph-note': true }, failure || note),
+      el('div', { class: 'w-global w-graph', id: 'global-graph', 'aria-label': '전체 그래프' },
+        data ? null : el('p', { class: 'w-muted' }, failure ? '' : '불러오는 중입니다.')));
+  }
+
+  function destroyGlobalGraph() {
+    if (globalCy) { globalCy.destroy(); globalCy = null; }
+    window.buildlogGraphCy = null;
+  }
+
+  function drawGlobalGraph() {
+    destroyGlobalGraph();
+    const box = document.getElementById('global-graph');
+    const key = graphKey();
+    const data = globalGraphs.get(key);
+    if (!box || !data) return;
+    box.replaceChildren();
+    if (!data.nodes.length) { box.append(el('p', { class: 'w-muted' }, '표시할 문서가 없습니다.')); return; }
+    const color = { dot: colorOf('--w-dot'), accent: colorOf('--w-accent'), line: colorOf('--w-line'), text: colorOf('--w-text') };
+    const saved = graphPositions.get(key);
+    globalCy = cytoscape({
+      container: box,
+      elements: [
+        ...data.nodes.map(n => ({ group: 'nodes', data: { id: n.id, label: n.title, type: n.type },
+          classes: [n.id === state.graphSelected ? 'current' : '', n.flag ? 'flagged' : ''].join(' ') })),
+        ...data.edges.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type }, classes: e.kind })),
+      ],
+      minZoom: 0.2,
+      maxZoom: 3,
+      style: [
+        { selector: 'node', style: { 'background-color': color.dot, width: 11, height: 11, label: 'data(label)', 'font-size': 11,
+          'font-family': '"Segoe UI", "Malgun Gothic", sans-serif', color: color.text, 'text-valign': 'bottom', 'text-margin-y': 5,
+          'text-wrap': 'ellipsis', 'text-max-width': 140 } },
+        { selector: 'node.flagged', style: { 'border-width': 2, 'border-color': color.accent } },   // touched by the run
+        { selector: 'node.current', style: { 'background-color': color.accent, width: 15, height: 15 } },
+        { selector: 'edge', style: { width: 1.2, 'line-color': color.line, 'curve-style': 'straight' } },
+      ],
+      layout: saved ? { name: 'preset', positions: saved, fit: true, padding: 24 }
+        : { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, padding: 24, idealEdgeLength: () => 70, nodeRepulsion: () => 9000 },
+    });
+    if (!saved) graphPositions.set(key, Object.fromEntries(globalCy.nodes().map(n => [n.id(), { ...n.position() }])));
+    globalCy.on('tap', 'node', event => selectNode(event.target.id()));
+    window.buildlogGraphCy = globalCy;   // exposed for inspection and browser tests
+  }
+
+  // Selecting a node shows it in the side panel; "문서 열기" opens it, as in the reference.
+  function selectNode(id) {
+    state.graphSelected = id;
+    if (globalCy) { globalCy.nodes().removeClass('current'); globalCy.getElementById(id).addClass('current'); }
+    refreshPreview();
+    if (!details.has(id)) {
+      api('GET', `/api/objects/${encodeURIComponent(id)}`).then(detail => { details.set(id, detail); if (state.graphSelected === id) refreshPreview(); })
+        .catch(report);
+    }
+  }
+
+  function refreshPreview() {
+    const panel = $('.w-context', main);
+    if (panel && state.active === 'graph') panel.replaceWith(previewPanel());
+  }
+
+  function previewPanel() {
+    const data = globalGraphs.get(graphKey());
+    const node = data && data.nodes.find(n => n.id === state.graphSelected);
+    if (!node) return el('aside', { class: 'w-context w-preview' }, el('div', { class: 'l-pane-title' }, '선택한 노드'),
+      el('p', { class: 'w-muted' }, '그래프에서 노드를 고르세요.'));
+    const detail = details.get(node.id);
+    const links = data.edges.filter(e => e.source === node.id || e.target === node.id).length;
+    return el('aside', { class: 'w-context w-preview' },
+      el('div', { class: 'l-pane-title' }, '선택한 노드'),
+      el('h2', { id: 'preview-title' }, node.title),
+      el('div', { class: 'w-kind' }, TYPE_LABEL[node.type] || node.type),
+      el('p', {}, detail ? detail.record.page.summary_md : ''),
+      el('dl', {}, el('dt', {}, '연결'), el('dd', {}, `${links}개`), el('dt', {}, '버전'), el('dd', {}, `v${node.version}`)),
+      el('button', { type: 'button', class: 'w-solid', 'data-open-selected': node.id, onclick: () => openTab(`doc:${node.id}`) }, '문서 열기'));
+  }
+
+  async function loadSettings() {
+    try {
+      settings = await api('GET', '/api/settings');
+    } catch (error) {
+      report(error);
+    }
+    if (state.active === 'settings') render();
+  }
+
+  function origin(text) {
+    const value = String(text || '');
+    if (value.startsWith('env ')) return `환경 변수 ${value.slice(4)}`;
+    if (value.startsWith('config ')) return '설정 파일';
+    return ORIGIN_LABEL[value] || value;
+  }
+
+  function settingsView() {
+    if (!settings) return el('div', { class: 'w-flat' }, el('h1', {}, '설정'), el('p', { class: 'w-muted' }, '불러오는 중입니다.'));
+    const shared = settings.config;
+    const rows = [
+      ['이 화면의 저장소', settings.store],
+      ['공통 저장소 설정', `${shared.store.value} (${origin(shared.store.origin)})`],
+      ['agy 경로', `${shared.agy.value} (${origin(shared.agy.origin)})`],
+      ['설정 파일', shared.file],
+      ['스키마 버전', `v${settings.schema_version}`],
+    ];
+    const differs = settings.store.toLowerCase() !== String(shared.store.value).toLowerCase();
+    return el('div', { class: 'w-flat' }, el('h1', {}, '설정'),
+      el('p', { class: 'w-muted' }, `읽기 전용입니다. 바꾸려면 CLI의 buildlog config set을 씁니다. 적용 순서: 명령 옵션 > 환경 변수 > 설정 파일 > 기본값.`),
+      differs ? el('p', { class: 'w-muted', 'data-store-differs': true }, '이 화면은 공통 설정과 다른 저장소를 보고 있습니다(serve --store로 띄운 경우).') : null,
+      el('dl', { class: 'w-config' }, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
   }
 
   // ------------------------------------------------------------ local graph
