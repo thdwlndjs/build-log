@@ -17,6 +17,7 @@ import re
 import secrets
 import socket
 import sqlite3
+import sys
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,6 +62,12 @@ class BuildlogServer(ThreadingHTTPServer):
         if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # A browser that navigates away drops its open requests; that is not a server error.
+        if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
     def __init__(self, store: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
         if not _loopback(host):
