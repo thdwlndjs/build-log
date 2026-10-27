@@ -320,11 +320,18 @@ class _Apply:
         """Every page belongs to an index (spec §3). An index without a parent is a top-level bundle;
         a column belongs to its table through PART_OF."""
 
+        candidates = [p["id"] for p in self.created.get("pages", [])] + [u["id"] for u in self.updated if u.get("type") == "page"]
+        bundled: set[str] = set()
+        for i in range(0, len(candidates), 500):   # one lookup per chunk; index_members has no index on the child
+            chunk = candidates[i:i + 500]
+            bundled.update(r[0] for r in self.c.execute(
+                f"SELECT DISTINCT child_page_id FROM index_members WHERE child_page_id IN ({','.join('?' * len(chunk))})", chunk))
+
         def unbundled(page_id: str) -> sqlite3.Row | None:
+            if page_id in bundled:
+                return None
             row = self.c.execute("SELECT id, type, title FROM pages WHERE id = ?", (page_id,)).fetchone()
             if row is None or row["type"] in ("index", "schema_column"):
-                return None
-            if self.c.execute("SELECT 1 FROM index_members WHERE child_page_id = ? LIMIT 1", (page_id,)).fetchone():
                 return None
             return row
 

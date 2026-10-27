@@ -110,21 +110,34 @@ def _children(c: sqlite3.Connection, index_id: str) -> list[sqlite3.Row]:
 
 
 def _sources_of(c: sqlite3.Connection, page_ids: list[str]) -> list[sqlite3.Row]:
+    """Sources linked to these pages (same routes as SOURCE_PAGES), filtered by page first so the cost
+    follows the pages asked for, not the size of the store."""
     if not page_ids:
         return []
-    marks = ",".join("?" * len(page_ids))
-    return c.execute(f"""SELECT s.id, s.kind, s.locator, s.metadata_json FROM sources s
-                         WHERE s.id IN (SELECT source_id FROM ({SOURCE_PAGES}) WHERE page_id IN ({marks}))
-                         ORDER BY s.captured_at DESC, s.rowid DESC""", page_ids).fetchall()
+    m = ",".join("?" * len(page_ids))
+    # CROSS JOIN keeps the page-side table first, so each branch starts from the page index instead of
+    # scanning every piece of evidence of that kind (the planner has no statistics to choose by).
+    return c.execute(f"""SELECT s.id, s.kind, s.locator, s.metadata_json FROM sources s WHERE s.id IN (
+            SELECT e.source_id FROM page_sources ps CROSS JOIN evidence e ON e.id = ps.evidence_id WHERE ps.page_id IN ({m})
+            UNION SELECT e.source_id FROM term_senses t CROSS JOIN object_evidence oe ON oe.object_type = 'term' AND oe.object_id = t.id
+                  CROSS JOIN evidence e ON e.id = oe.evidence_id WHERE t.page_id IN ({m})
+            UNION SELECT e.source_id FROM rules r CROSS JOIN object_evidence oe ON oe.object_type = 'rule' AND oe.object_id = r.id
+                  CROSS JOIN evidence e ON e.id = oe.evidence_id WHERE r.scope_page_id IN ({m})
+            UNION SELECT e.source_id FROM relations rel CROSS JOIN object_evidence oe ON oe.object_type = 'relation' AND oe.object_id = rel.id
+                  CROSS JOIN evidence e ON e.id = oe.evidence_id WHERE rel.removed_at IS NULL AND rel.source_id IN ({m})
+            UNION SELECT e.source_id FROM relations rel CROSS JOIN object_evidence oe ON oe.object_type = 'relation' AND oe.object_id = rel.id
+                  CROSS JOIN evidence e ON e.id = oe.evidence_id WHERE rel.removed_at IS NULL AND rel.target_id IN ({m})
+            UNION SELECT e.source_id FROM join_path_tables jt CROSS JOIN object_evidence oe ON oe.object_type = 'join_path' AND oe.object_id = jt.join_path_id
+                  CROSS JOIN evidence e ON e.id = oe.evidence_id WHERE jt.page_id IN ({m}))
+          ORDER BY s.captured_at DESC, s.rowid DESC""", [*page_ids] * 6).fetchall()
 
 
 def unbundled_pages(c: sqlite3.Connection) -> list[dict[str, Any]]:
     """Pages that belong to no bundle (spec §3): not in any index; a column without its table."""
     rows = c.execute(f"""SELECT p.id, p.title, p.type FROM pages p WHERE {NOT_MERGED} AND (
-                           (p.type NOT IN ('index', 'schema_column')
-                            AND NOT EXISTS (SELECT 1 FROM index_members m WHERE m.child_page_id = p.id))
-                           OR (p.type = 'schema_column' AND NOT EXISTS (
-                            SELECT 1 FROM relations r WHERE r.source_id = p.id AND r.type = 'PART_OF' AND r.removed_at IS NULL)))
+                           (p.type NOT IN ('index', 'schema_column') AND p.id NOT IN (SELECT child_page_id FROM index_members))
+                           OR (p.type = 'schema_column' AND p.id NOT IN (
+                            SELECT source_id FROM relations WHERE type = 'PART_OF' AND removed_at IS NULL)))
                          ORDER BY p.title, p.id""").fetchall()
     return [{"id": r["id"], "title": r["title"], "type": r["type"]} for r in rows]
 
@@ -133,7 +146,7 @@ def list_sessions(store: Path) -> dict[str, Any]:
     with closing(_open(store)) as c:
         tops = c.execute(f"""SELECT p.id, p.title, p.summary_md, p.version, p.updated_at FROM pages p
                              WHERE p.type = 'index' AND {NOT_MERGED}
-                             AND NOT EXISTS (SELECT 1 FROM index_members m WHERE m.child_page_id = p.id)
+                             AND p.id NOT IN (SELECT child_page_id FROM index_members)
                              ORDER BY p.title, p.id""").fetchall()
         sessions = []
         for top in tops:
