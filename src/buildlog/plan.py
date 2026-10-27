@@ -24,7 +24,7 @@ EVIDENCE_KINDS = {"observed", "reported", "inferred"}
 JOIN_KINDS = {"inner", "left", "right", "full", "unknown"}
 CARDINALITIES = {"1:1", "1:N", "N:1", "N:M", "unknown"}
 MAX_CONTENT_BYTES = 5 * 1024 * 1024
-V2_KEYS = {"idempotency_key", "sources", "evidence", "pages", "terms", "relations", "join_paths", "rules", "index_members", "research"}
+V2_KEYS = {"idempotency_key", "sources", "evidence", "pages", "terms", "relations", "join_paths", "rules", "index_members", "research", "prior_check"}
 
 _TOKEN_VALUE_RE = re.compile(r"\b(?:ghp|gho|github_pat|sk|xox[bp])[-_][A-Za-z0-9_-]{16,}\b|\bAKIA[0-9A-Z]{16}\b")
 _ASSIGNED_SECRET_RE = re.compile(r"(?i)\b((?:password|passwd|pwd|secret|api[_-]?key|token)\s*[:=]\s*)(['\"]?)[^\s'\";,]+\2")
@@ -144,7 +144,7 @@ def _from_legacy(legacy: dict[str, Any]) -> dict[str, Any]:
 
 def _empty_plan(key: str) -> dict[str, Any]:
     return {"idempotency_key": key, "sources": [], "evidence": [], "pages": [], "terms": [], "relations": [],
-            "join_paths": [], "rules": [], "index_members": [], "research": [], "warnings": []}
+            "join_paths": [], "rules": [], "index_members": [], "research": [], "prior_check": None, "warnings": []}
 
 
 # ---------------------------------------------------------------- v2 sources and evidence
@@ -548,6 +548,24 @@ def _index_member(raw: Any, index: int) -> dict[str, Any]:
 
 
 MAX_RESEARCH_QUESTION = 1000
+PRIOR_DECISIONS = {"new", "update", "follow_up", "already_recorded"}
+
+
+def _prior_check(raw: Any) -> dict[str, Any]:
+    """What the host looked up before saving, and what it decided (new record, update, follow-up)."""
+    where = "prior_check"
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{where} must be an object")
+    terms = raw.get("terms") or []
+    if not isinstance(terms, list) or not all(isinstance(t, str) for t in terms):
+        raise ValidationError(f"{where}.terms must be a list of strings")
+    candidates = raw.get("candidates") or []
+    if not isinstance(candidates, list) or not all(isinstance(c, str) and c.strip() for c in candidates):
+        raise ValidationError(f"{where}.candidates must be a list of page ids")
+    return {"query": require_text(raw.get("query"), f"{where}.query"), "terms": terms, "candidates": candidates,
+            "decision": _choice(raw.get("decision"), PRIOR_DECISIONS, f"{where}.decision"),
+            "reason": require_text(raw.get("reason"), f"{where}.reason")}
+
 
 
 def _research(raw: Any, index: int) -> dict[str, Any]:
@@ -613,6 +631,7 @@ def normalize_plan(raw: Any) -> tuple[dict[str, Any], str]:
     plan["rules"] = [_rule(item, i, evidence_kinds) for i, item in enumerate(_list(raw, "rules"))]
     plan["index_members"] = [_index_member(item, i) for i, item in enumerate(_list(raw, "index_members"))]
     plan["research"] = [_research(item, i) for i, item in enumerate(_list(raw, "research"))]
+    plan["prior_check"] = _prior_check(raw.get("prior_check")) if raw.get("prior_check") is not None else None
     for kind in ("pages", "terms", "join_paths", "rules"):
         _unique_refs(plan[kind], kind)
 
@@ -628,5 +647,5 @@ def normalize_plan(raw: Any) -> tuple[dict[str, Any], str]:
 
     # "research" joined the plan after v2 plans were stored; leaving it out when empty keeps
     # those plans' input hashes, and so their idempotency, unchanged.
-    hash_basis = {k: v for k, v in plan.items() if k != "warnings" and not (k == "research" and not v)}
+    hash_basis = {k: v for k, v in plan.items() if k != "warnings" and not (k in ("research", "prior_check") and not v)}
     return plan, sha256(hash_basis)

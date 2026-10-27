@@ -280,12 +280,40 @@ class _Apply:
             self._join_path(path, f"join_paths[{i}]")
         for i, rule in enumerate(self.plan["rules"]):
             self._rule(rule, f"rules[{i}]")
+        self._check_prior()
         research = [self._research_request(item, f"research[{i}]") for i, item in enumerate(self.plan["research"])]
         if research:
             self.c.execute("UPDATE runs SET research_status = 'pending' WHERE id = ?", (self.run_id,))
             self.created["research_requests"] = research
         reindex(self.c, self.touched)
         return self._finish()
+
+    def _check_prior(self) -> None:
+        """Record the host's pre-save lookup and warn when the plan does not match its own decision."""
+        prior = self.plan["prior_check"]
+        new_experiences = [p for p in self.created.get("pages", []) if p.get("type") == "experience" and p.get("ref")]
+        if prior is None:
+            if new_experiences:
+                self.warnings.append("prior_check missing: existing records were not looked up before saving a new experience; "
+                                     "a duplicate or an unlinked follow-up is possible")
+            return
+        resolved = []
+        for candidate in prior["candidates"]:
+            if self.c.execute("SELECT 1 FROM pages WHERE id = ?", (candidate,)).fetchone() is None:
+                raise ValidationError(f"prior_check.candidates: page {candidate} does not exist")
+            resolved.append(db.resolve_redirect(self.c, candidate))
+        prior = prior | {"candidates": resolved}
+        updated_pages = {u["id"] for u in self.updated if u.get("type") == "page"}
+        new_ids = {p["id"] for p in self.created.get("pages", []) if p.get("ref")}
+        linked = {(r["source"], r["target"]) for r in self.created.get("relations", [])}
+        linked |= {(r["target"], r["source"]) for r in self.created.get("relations", [])}
+        if prior["decision"] == "update" and not updated_pages & set(resolved):
+            self.warnings.append("prior_check says update, but no candidate page is updated in this plan")
+        if prior["decision"] == "follow_up" and not any((n, c) in linked for n in new_ids for c in resolved):
+            self.warnings.append("prior_check says follow_up, but no new page is related to a candidate")
+        if prior["decision"] == "already_recorded" and new_experiences:
+            self.warnings.append("prior_check says already_recorded, but the plan still creates a new experience page")
+        self.prior = prior
 
     def _research_request(self, item: dict[str, Any], where: str) -> dict[str, Any]:
         # Only recorded here. The research itself runs later (`buildlog research`), outside this
@@ -310,6 +338,7 @@ class _Apply:
             "sources": [self._source_report(s) for s in self.plan["sources"]],
             "warnings": self.warnings,
             "research_status": "pending" if self.plan["research"] else "not_requested",
+            "prior_check": getattr(self, "prior", None),
         }
         # Saved, but not everything given was read: say so instead of reporting full success.
         partial = [s["ref"] for s in result["sources"] if s["parse_status"] == "partial"]
