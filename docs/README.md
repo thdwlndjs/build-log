@@ -54,6 +54,13 @@
 
 # Claude Code·Codex 스킬 설치/갱신 (skills/buildlog/ 원본에서)
 .\.venv\Scripts\python.exe -m buildlog install-skill [--host claude-code|codex|all] [--dry-run]
+
+# 백업·복원, Markdown 내보내기·가져오기, 웹 근거 원문 대조 (아래 "운영" 참고)
+.\.venv\Scripts\python.exe -m buildlog backup --out D:\kb\buildlog-20261027.sqlite3
+.\.venv\Scripts\python.exe -m buildlog restore --from D:\kb\buildlog-20261027.sqlite3
+.\.venv\Scripts\python.exe -m buildlog export --out D:\kb\export [--page <page_id>] [--force]
+.\.venv\Scripts\python.exe -m buildlog import --in D:\kb\export [--dry-run]
+.\.venv\Scripts\python.exe -m buildlog verify-sources --page <page_id> | --all
 ```
 
 ## Claude Code·Codex에서 사용
@@ -118,14 +125,14 @@ CLI로 같은 작업을 하려면:
 - 실행 방식: `agy --print … --output-format json --json-schema <파일> --mode plan --print-timeout <초>`를 인자 배열로, 빈 임시 폴더에서 실행합니다. 권한 생략 옵션(`--dangerously-skip-permissions`)은 쓰지 않고, 프롬프트로 웹 검색·읽기 외 도구를 금지합니다.
 - 성공 판정: agy는 권한 거부나 시간 초과 때도 종료 코드 0과 `status: SUCCESS`를 냅니다. 그래서 스키마에 맞는 구조화 결과와 유효한 근거가 1건 이상 있을 때만 성공으로 봅니다.
 - 실패 분류: `not_installed`, `auth`, `permission`, `timeout`, `output`, `no_findings`, `process`. 실패하면 종료 코드 5를 내고, 같은 명령으로 끝나지 않은 요청만 재개합니다. 이미 성공한 요청을 `--retry-succeeded`로 다시 돌리다 실패해도 기존 결과와 상태는 유지됩니다.
-- 저장: 근거마다 `web` 출처와 근거를 만들고 확보 수준을 남깁니다. 원문 확인(fetched)은 `observed`, 검색 결과 요약(search_snippet)과 모델 기억(from_memory)은 `reported`입니다. 검색 리디렉션 링크는 "원문 주소 아님"으로 표시합니다. 결론 수정은 하지 않습니다. 근거가 결론을 바꾸면 호스트가 `update`로 반영합니다.
+- 저장: 근거마다 `web` 출처와 근거를 만들고 조사자가 밝힌 확보 수준(원문 확인 fetched, 검색 결과 요약 search_snippet, 모델 기억 from_memory)을 남깁니다. 조사 직후 Buildlog가 원문 페이지를 직접 열어 리디렉션을 풀고 인용문을 대조합니다(아래 "웹 근거 원문 대조"). 근거는 인용이 원문에 그대로 있을 때만 `observed`이고, 나머지는 확보 수준과 관계없이 `reported`입니다. 결론 수정은 하지 않습니다. 근거가 결론을 바꾸면 호스트가 `update`로 반영합니다.
 - 페이지 Markdown의 "외부 조사" 섹션에서 요청별 상태와 시도 횟수, 실패 원인을 볼 수 있습니다.
 
 ## 검색
 
 `query`는 질문 단어와 호스트가 보강한 검색어(`terms`)로 후보를 찾고, 작업 에이전트가 그대로 읽을 Markdown 묶음을 돌려줍니다.
 
-- 색인: 페이지 제목·별칭·요약·본문, 그리고 페이지에 연결된 용어 정의·규칙·조인 경로·컬럼 이름을 SQLite FTS5 trigram으로 색인합니다. 한국어 조사("파티션을")는 떼고 찾습니다. 3자 미만 검색어는 제목·별칭·요약에서만 찾습니다. 질문 속 FTS 문법은 일반 글자로 취급합니다.
+- 색인: 페이지 제목·별칭·요약·본문, 그리고 페이지에 연결된 용어 정의·규칙·조인 경로·컬럼 이름을 SQLite FTS5 trigram으로 색인합니다. 한국어 조사("파티션을")는 떼고 찾습니다. 3자 미만 검색어("설치", "권한")는 trigram으로 찾을 수 없어 제목·별칭·요약·본문을 부분 문자열로 찾습니다. 제목·별칭 일치가 더 높은 점수를 받습니다. 질문 속 FTS 문법은 일반 글자로 취급합니다.
 - 순위: 제목·별칭 일치에 가중치를 두고, 오류 코드·명령 이름 같은 식별자가 정확히 일치하면 크게 올립니다. 대체(superseded)·폐기(deprecated)된 기록은 내립니다. 최고 점수의 20%에 못 미치는 후보는 고르지 않습니다.
 - 범위(`scope`): 시스템 키를 주면 그 시스템의 테이블과 연결된 기록만 고릅니다. 환경 단어를 주면 제목·요약·`## 환경` 섹션에서만 판단합니다. 범위 밖 후보는 숨기지 않고 "다른 범위의 후보"로 따로 보여줍니다.
 - 기본값: 후보 20, 본문을 넣는 기록 5, 관계 1단계 확장 최대 10, 출력 예산 24,000 bytes.
@@ -181,6 +188,69 @@ CLI로 같은 작업을 하려면:
 - 동시에 같은 키로 저장해도 한 번만 저장되고 나머지는 `reused`로 돌아옵니다.
 
 예제 자료는 [examples/demo_mes/](../examples/demo_mes/)에 있습니다. 실제 시스템이 아닌 데모 자료입니다.
+
+## 운영
+
+### 설치와 갱신
+
+```powershell
+git clone https://github.com/thdwlndjs/build-log; cd build-log
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .            # 브라우저 E2E 테스트까지: -e .[dev]
+.\.venv\Scripts\python.exe -m buildlog init               # 저장소 생성
+.\.venv\Scripts\python.exe -m buildlog install-skill      # Claude Code·Codex 스킬 설치
+```
+
+- 갱신: `git pull` 후 `pip install -e .`와 `install-skill`을 다시 실행합니다. 저장소 구조는 다음 명령 실행 때 자동으로 최신 버전으로 올라가고(기존 데이터 유지), 필요한 경우 검색 색인도 한 번 다시 만듭니다. 큰 갱신 전에는 `backup`을 먼저 받아 둡니다.
+- 처음 사용: Claude Code나 Codex에서 "이 문제 해결한 거 buildlog에 저장해줘"라고 요청하고, 다른 세션에서 "예전에 이 오류 본 적 있어?"로 찾습니다. 외부 조사를 쓰려면 `agy.exe`에 한 번 로그인합니다.
+
+### 저장 전 기존 기록 확인 (prior_check)
+
+호스트는 새 경험을 저장하기 전에 `query`로 기존 기록을 찾고, 결정을 저장 계획의 `prior_check`에 남깁니다.
+
+| 결정 | 의미 |
+| --- | --- |
+| `new` | 같은 문제의 기록이 없어 새로 만듦 |
+| `update` | 기존 기록을 고침(계획에 그 페이지 갱신이 있어야 함) |
+| `follow_up` | 새 기록을 만들고 기존 기록과 관계로 연결 |
+| `already_recorded` | 이미 기록돼 있어 새 경험 페이지를 만들지 않음 |
+
+`prior_check` 없이 새 경험 페이지를 만들거나, 결정과 계획 내용이 맞지 않으면 저장은 되지만 경고가 나옵니다. 경험에 쓰인 개념·방법은 `concept`·`method` 페이지로 연결하고, 주제별 목차(`index`) 페이지에 등록합니다.
+
+### 백업과 복원
+
+- `backup --out <파일>`: SQLite 백업 API로 실행 중에도 일관된 사본을 만들고 무결성 검사를 통과해야 성공합니다. 같은 파일이 있으면 `--force`가 필요합니다.
+- `restore --from <파일>`: 백업의 무결성과 스키마 버전을 확인한 뒤, 현재 저장소를 `<저장소>.pre-restore-<시각>`으로 남기고 바꿉니다. 검토 서버가 이 저장소를 쓰고 있으면 거부합니다(`serve --stop` 먼저).
+
+### 내보내기와 가져오기
+
+- `export --out <폴더>`: 한 시점의 스냅숏으로 페이지마다 `pages/<id>.md`를, 전체 행은 `manifest.json`에 씁니다. `--page`로 특정 페이지와 거기 딸린 용어·규칙·근거만 내보낼 수 있습니다.
+- Markdown 파일에서 고칠 수 있는 것은 제목·상태·요약·본문입니다(`buildlog:summary`/`body`/`end` 표시 사이). 앞부분 ID·버전과 `manifest.json`의 행은 고치지 않습니다. 행을 고치면 해시가 맞지 않아 가져오기를 거부합니다.
+- `import --in <폴더>`: 행을 UUID로만 맞춥니다. 없는 행은 추가하고, 버전이 더 높은 행은 갱신하고, Markdown에서 고친 페이지는 새 버전으로 저장합니다. 내보낸 뒤 저장소에서 바뀐 항목이 있으면 덮어쓰지 않고 `IMPORT_CONFLICT`(종료 코드 3)로 전체를 취소합니다. `--dry-run`으로 결과만 먼저 볼 수 있습니다.
+
+### 웹 근거 원문 대조
+
+`verify-sources --page <id>` 또는 `--all`은 외부 조사로 저장한 웹 근거마다 원문 페이지를 직접 열어 인용문을 대조합니다.
+
+- 검색 리디렉션 링크는 실제 원문 주소로 바꿉니다.
+- 결과는 `exact`(인용 그대로 있음), `partial`(단어 80% 이상 일치), `absent`(찾지 못함), `unreadable`(원문을 읽지 못함) 중 하나입니다. `exact`일 때만 근거를 `observed`로 올립니다.
+- 같은 원문·같은 인용의 중복 연결은 정리합니다(행은 남김).
+- 네트워크가 막힌 환경(샌드박스, 오프라인)에서 원문에 닿지 못하면 이전 결과와 주소를 그대로 두고, 실패만 `last_failed_check`에 남깁니다. `BUILDLOG_OFFLINE=1`이면 `research` 직후의 자동 대조를 건너뜁니다.
+
+### 장애 대응
+
+| 증상 | 확인 | 조치 |
+| --- | --- | --- |
+| 저장 실패 | `runs --status failed`로 단계·오류 종류·메시지 확인 | 계획을 고쳐 같은 `idempotency_key`로 `ingest` 재실행. 실패한 저장은 데이터를 남기지 않음 |
+| 조사 실패(종료 코드 5) | 출력의 실패 종류(`auth`, `timeout` 등) | `auth`면 `agy.exe` 로그인 후, 같은 `research` 명령으로 남은 요청만 재개 |
+| 검색 결과가 이상함 | 다른 도구로 DB를 직접 고쳤는지 | `reindex` |
+| 검토 화면이 안 열림 | `serve --status` | `serve --stop` 후 `serve --detach`. 서버 정보는 저장소 옆 `serve.json` |
+| 저장소 손상·잘못된 대량 수정 | `backup` 파일의 존재 | `serve --stop` 후 `restore --from <백업>` |
+| 다른 저장소를 쓰는 것 같음 | `config show`로 값과 출처 확인 | `config set store "<경로>"` 또는 `BUILDLOG_STORE` |
+
+### 규모
+
+측정 결과는 [benchmark.json](benchmark.json)과 [benchmark.md](benchmark.md)에 있습니다. 다시 측정하려면 `.\.venv\Scripts\python.exe tools\benchmark.py --sizes 100 1000 10000 --runs 30 --out docs\benchmark.json`을 실행합니다.
 
 ## 응답과 오류
 
