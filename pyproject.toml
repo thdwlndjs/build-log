@@ -9,6 +9,11 @@ description = "Local knowledge store for reusable development experience"
 requires-python = ">=3.12"
 dependencies = []
 
+[project.optional-dependencies]
+# Browser end-to-end tests of the review UI (tests/test_ui_e2e.py).
+# After installing: python -m playwright install chromium
+dev = ["playwright==1.47.0"]
+
 [project.scripts]
 buildlog = "buildlog.cli:main"
 
@@ -17,3 +22,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# The review UI and its bundled libraries are served from the package; no CDN at runtime.
+buildlog = ["web/*.html", "web/*.js", "web/*.css", "web/vendor/*"]
