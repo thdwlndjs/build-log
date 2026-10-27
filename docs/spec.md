@@ -318,7 +318,7 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 9 | init·ingest·query·read·neighbors·paths·update·research | 구현 | |
 | 9 | feedback·merge·serve | 구현 | `unlink`도 추가. `serve --detach/--status/--stop` |
 | 9 | export/import | 구현 | `export`·`import`(`--dry-run`), `backup`·`restore`, `verify-sources` 추가 |
-| 10 | 그래프 피드백 UI와 API | 구현 | 127.0.0.1 전용, Cytoscape.js·marked·DOMPurify 번들(CDN 없음), 세션 토큰·Origin·Host 검사, 기본 150/300·상한 500/1,000, 페이지·관계·용어·규칙·경로 수정, 해제, 병합, 피드백, 조인 경로 강조, summary_dirty. 인라인 스타일은 Cytoscape가 넣는 한 개만 해시로 허용 |
+| 10 | 그래프 피드백 UI와 API | 부분(Phase 5) | API는 모두 구현: 127.0.0.1 전용, 번들 자산(CDN 없음), 세션 토큰·Origin·Host 검사, 기본 150/300·상한 500/1,000, 페이지·관계·용어·규칙·경로 수정, 해제, 병합, 피드백, summary_dirty. 화면은 Phase 5에서 작업 공간(10.2)으로 교체했고, 관계·용어·규칙·경로 수정, 해제, 병합, 피드백, 조인 경로 강조, 제목·요약·상태 수정은 화면에 연결하지 않았다(API·CLI 유지, 연결 여부는 사용자 QA 후 결정, docs/workbench-menu-draft.md). 인라인 스타일은 Cytoscape가 넣는 한 개만 해시로 허용 |
 | 11 | agy 인자 배열 실행, 타임아웃·출력 크기 제한·스키마 검증, 확보 수준 기록, 권한 생략 미사용, 실패 재개 | 구현 | agy 검색 도구가 원문 주소 대신 검색 리디렉션 링크를 주고 인용이 대부분 의역임. Phase 4에서 조사 직후 Buildlog가 리디렉션을 풀고 원문 페이지와 인용을 대조(`sources.py`). 원문에 그대로 있는 인용만 `observed`. 원문에 닿지 못한 재검증은 이전 결과 유지 |
 | 11 | Codex·Claude Code 스킬이 같은 CLI·저장소 계약 공유 | 구현 | 저장소의 `skills/buildlog/` 원본을 `install-skill`로 설치 |
 | 12 | 병합(대표 UUID와 redirect, 참조 재연결, 중복 관계 근거 합치기) | 구현 | 스키마 페이지는 병합 대신 스키마 재인제스트 |
@@ -328,9 +328,9 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 2·6, mvp §7-2, PRD R02 | 저장 전 기존 제목·별칭·요약·관계 조회로 신규/갱신/후속 결정, 의미 중복은 호스트가 후보 비교 | 구현 | 스킬 저장 절차에 조회·결정 단계, 계획의 `prior_check`(`new`·`update`·`follow_up`·`already_recorded`). 조회 기록 누락, 결정과 계획 불일치, 없는 후보는 경고·오류. 의미 중복 판단은 호스트 몫 |
 | mvp §2·§7-3·4, PRD R05 | 상위 개념·방법을 경험에 연결, 외부 근거를 개념·방법·검증과 연결 | 구현 | 스킬 지침에 concept·method 선정·연결 단계. 실제 저장에서 방법 페이지를 경험과 연결함(docs/verification.md). 조사 근거는 요청한 페이지에 연결 |
 | mvp §7-5 | 영향받은 목차 요약만 갱신 | 구현 | 스킬 지침에 관련 목차 등록·요약 갱신 단계. 목차 갱신은 호스트가 계획에 넣고 Buildlog가 순환·참조를 검사 |
-| 13 | UI 수정 검증 | 구현 | Playwright Chromium E2E 9건: 본문·관계·정의 수정이 CLI read·query에 반영, 해제·병합 후 참조·근거 보존, 버전 충돌, 피드백, 조인 경로 강조, Markdown 정화 |
+| 13 | UI 수정 검증 | 부분(Phase 5) | 작업 공간 E2E 16건(Chromium): 문서·주변 그래프, 탐색기·전체 문서·검색·소스, 전체 그래프·`?run=`·설정, 본문 수정의 CLI read·query 반영, 버전 충돌, Markdown 정화. Phase 3 화면의 관계·정의 수정, 해제·병합, 피드백, 조인 경로 강조 E2E는 화면 교체로 빠졌고 서버 쪽은 `test_review`가 확인한다(확인 내용은 docs/workbench-menu-draft.md 3절) |
 | 13 | 100/1,000/10,000페이지 성능 측정 | 구현 | 각 30회. 1,000페이지 query p95 106ms, 그래프 API p95 41ms, 10,000페이지 query p95 251ms(docs/benchmark.md) |
 | 13 | PRD R01–R13 검증 근거 | 구현 | docs/verification.md: 요구별 테스트와 실제 실행 기록 |
 | 3·6 | 모든 문서의 묶음 소속, 소속 없는 새 문서 거부(`BUNDLE_REQUIRED`), 기존 누락 경고(`BUNDLE_MISSING`) | 구현(Phase 5-2) | `ingest.py` 커밋 전 검사, `tests/test_bundles.py`. 스킬 목차 단계 필수화. 기존 누락(실사용 3건, 데모 2건)은 승인된 배치대로 정리해 0건. v1 단일 페이지 계획은 목차를 지정할 수 없어 index가 아닌 새 페이지를 만들 수 없다(이미 저장된 v1 실행의 재호출은 기존 결과를 그대로 돌려준다) |
-| 10.1·10.3 | 작업 공간용 조회 API(pages·sessions·sources·settings, graph `mode=all`) | 부분(Phase 5-4) | `browse.py`: pages·sessions·sessions/{id}·sources·sources/{id} 구현, 계약 테스트 8건 통과. settings·graph `mode=all`은 5-5(계약 테스트 2건 예상 실패로 표시) |
-| 10.2 | 작업 공간 화면 | 부분(Phase 5-4) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외)의 CSS·배치를 옮김. 연결됨: 제목줄·탭 줄·도구줄·상태줄·URL, 문서 탭(본문·관련 문서·주변 그래프·정보·이력·근거·본문 수정, 5-3), 탐색기 세션·소스와 목록 필터, 세션·소스 탭, 전체 문서, 검색, 근거→소스, 소속 없는 문서 경고(5-4). 미연결(5-5): 전체 그래프, 설정. 기준 위치에 "연결 예정"으로 표시 |
+| 10.1·10.3 | 작업 공간용 조회 API(pages·sessions·sources·settings, graph `mode=all`) | 구현(Phase 5-4·5-5) | `browse.py`(pages·sessions·sessions/{id}·sources·sources/{id}), `/api/settings`, `graph(everything=True)`. 계약 테스트 10건 통과. 10,000페이지 측정은 docs/benchmark.md |
+| 10.2 | 작업 공간 화면 | 구현(Phase 5-5) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외)의 CSS·배치를 옮김. 제목줄·탭 줄·도구줄·상태줄·URL(`?tab=`, `?open=`·`?focus=`·`?run=` 호환), 탐색기 세션·소스와 목록 필터, 문서 탭(본문·관련 문서·주변 그래프·정보·이력·근거·본문 수정), 세션·소스 탭, 전체 문서, 검색, 전체 그래프(선택한 노드, 저장 실행 보기), 설정(읽기 전용), 소속 없는 문서 경고. 기준 화면에 위치가 없는 기존 기능은 미연결(10.2 끝, R10) |

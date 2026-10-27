@@ -18,7 +18,9 @@
 | 본문 수정 | '편집' 탭에서 제목·요약·본문·상태를 함께 수정 | 도구줄 [본문 수정] → 본문(`body_md`)만 수정·저장·취소 | `PATCH /api/pages/{id}` |
 | 이력 | '이력' 탭(버전·시각·이유) | 오른쪽 [이력] | `GET /api/objects/{id}` |
 | 근거 | 본문 Markdown 안의 출처 절 | 오른쪽 [근거] → 소스 탭(원문 또는 저장된 발췌·인용, 연결 문서) | `GET /api/objects/{id}`, `GET /api/sources/{id}` |
-| 전체 그래프 | 처음 화면(최근 저장 실행 주변) | 탭 줄 [전체 그래프] | `GET /api/graph?mode=all` |
+| 전체 그래프 | 처음 화면(최근 저장 실행 주변) | 탭 줄 그래프 버튼, 주변 연결의 [전체 그래프] → 전체 그래프 탭(선택한 노드 → 문서 열기) | `GET /api/graph?mode=all` |
+| 설정 확인 | 없음(CLI `config show`) | 제목줄 [설정] → 읽기 전용 설정 탭 | `GET /api/settings` |
+| 탐색·목록·검색 | 노드 목록과 검색 결과 그래프 | 탐색기 세션·소스, [전체 문서], [검색] | `GET /api/sessions`, `/api/sources`, `/api/pages`, `/api/search` |
 | 저장 실행 링크 | `?run=<id>`로 그 실행의 그래프 | `?run=<id>` → 전체 그래프 탭의 저장 실행 보기 | `GET /api/graph?run=` |
 
 ## 2. 작업 공간에 연결하지 않는 기존 기능
