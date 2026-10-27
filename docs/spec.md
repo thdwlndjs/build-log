@@ -223,7 +223,7 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 - [Slipbox 관계](https://agentria.ai/docs/slip-link-node), [조회](https://agentria.ai/docs/slip-follow-links-node): 방향과 유형이 있는 연결.
 - `mvp.md`와 사용자 첨부 화면: 제품 범위 및 테이블·조인·금칙·미지원 연산 요구.
 
-## 16. 구현 대조 (2026-10-26, Phase 2.3 완료 시점)
+## 16. 구현 대조 (2026-10-27, Phase 3 완료 시점)
 
 명세의 요구는 지우지 않고 구현 상태만 표시한다. 미구현 항목은 계획된 Phase에서 구현한다.
 
@@ -232,8 +232,8 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 1 | 단일 공통 저장소, 설정 파일과 `--store` | 구현 | `config.toml`, 우선순위 옵션 > 환경 변수 > 설정 파일 > 기본값 |
 | 2 | UUID 참조, 외래키, 트랜잭션, `expected_version`, `VERSION_CONFLICT` | 구현 | |
 | 3 | pages·term_senses·aliases·relations·index_members·sources·evidence·page_sources·revisions·runs·schema_objects·join_paths·rules·search_index | 구현 | 단일 `evidence_ref` 대신 `object_evidence` 연결 테이블로 복수 근거 저장 |
-| 3 | feedback 레코드 | 미구현 | Phase 3 |
-| 3 | 관계 해제(soft-delete), 목차 순환 거부 | 부분 | 목차 순환 거부는 구현. 해제는 Phase 3 |
+| 3 | feedback 레코드 | 구현 | `feedback` 테이블. 피드백은 본 버전과 함께 기록하고, 해결한 수정의 revision과 연결 |
+| 3 | 관계 해제(soft-delete), 목차 순환 거부 | 구현 | `relations.removed_at`·`removed_reason`. 해제된 관계는 조회·검색·경로·그래프에서 빠지고 근거·이력은 남음. 이후 저장이 해제된 관계를 되살리지 않음 |
 | 4 | current_conversation·markdown·text·sql_ddl·schema_json·sample_json/csv | 구현 | DDL 방언은 postgresql·oracle. schema_json `samples` 처리 포함 |
 | 5 | 용어 맥락 구분, extracted/inferred 분리, 근거 없는 카디널리티 금지, 부재 확인의 근거 요구 | 구현 | 조인 단계 관계 수·NULL은 PK·FK로 증명될 때만 자동 결정 |
 | 6 | 단계 `received → normalized → planned → committed`, 멱등성, 원자적 저장, 조사 실패 시 경험 보존 | 구현 | 실패 단계·오류 보존, 같은 key 저장 재시도, 조사 재개와 구분 |
@@ -241,15 +241,17 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 7 | 범위 충돌 시 후보와 차이 제공 | 부분 | 범위 밖 후보와 그 범위는 표시. 항목별 차이 비교는 없음 |
 | 8 | 에이전트 Markdown, 24,000 bytes 예산, `BUDGET_TOO_SMALL`, 생략 목록, 상충·정정 | 구현 | 상충·정정은 CONTRADICTS·SUPERSEDES 관계와 대체 상태 기준 |
 | 9 | init·ingest·query·read·neighbors·paths·update·research | 구현 | |
-| 9 | feedback·merge·export/import·serve | 미구현 | Phase 3·4 |
-| 10 | 그래프 피드백 UI와 API | 미구현 | Phase 3 |
+| 9 | feedback·merge·serve | 구현 | `unlink`도 추가. `serve --detach/--status/--stop` |
+| 9 | export/import | 미구현 | Phase 4 |
+| 10 | 그래프 피드백 UI와 API | 구현 | 127.0.0.1 전용, Cytoscape.js·marked·DOMPurify 번들(CDN 없음), 세션 토큰·Origin·Host 검사, 기본 150/300·상한 500/1,000, 페이지·관계·용어·규칙·경로 수정, 해제, 병합, 피드백, 조인 경로 강조, summary_dirty. 인라인 스타일은 Cytoscape가 넣는 한 개만 해시로 허용 |
 | 11 | agy 인자 배열 실행, 타임아웃·출력 크기 제한·스키마 검증, 확보 수준 기록, 권한 생략 미사용, 실패 재개 | 구현 | agy 검색 도구가 원문 주소 대신 검색 리디렉션 링크를 줌(표시·경고). 확보 수준은 대부분 검색 결과 요약 |
 | 11 | Codex·Claude Code 스킬이 같은 CLI·저장소 계약 공유 | 구현 | 저장소의 `skills/buildlog/` 원본을 `install-skill`로 설치 |
-| 12 | 내보내기·가져오기·병합·DB 백업 CLI | 미구현 | Phase 3·4. 색인 재구축(`reindex`)만 구현 |
+| 12 | 병합(대표 UUID와 redirect, 참조 재연결, 중복 관계 근거 합치기) | 구현 | 스키마 페이지는 병합 대신 스키마 재인제스트 |
+| 12 | 내보내기·가져오기·DB 백업 CLI | 미구현 | Phase 4. 색인 재구축(`reindex`)만 구현 |
 | 13 | 저장·멱등, 용어, 근거·RCA, 스키마, 경로, 규칙, 없는 기능, 실제 조사 검증 | 구현 | 테스트와 실제 스킬·agy·Codex 실행으로 확인 |
 | 13 | 새 세션 조회 | 부분 | 검색·전달은 검증. Codex는 새 세션에서 스킬 이름 없는 자연어 요청으로 스킬을 골라 조회함을 확인(2026-10-27). Claude Code 새 세션 자동 호출은 미검증 |
 | 2·6, mvp §7-2, PRD R02 | 저장 전 기존 제목·별칭·요약·관계 조회로 신규/갱신/후속 결정, 의미 중복은 호스트가 후보 비교 | 부분 | 조회·갱신·관계 기능은 있으나 스킬 저장 절차에 조회 단계가 없음. Phase 4 "저장 흐름 보완" |
 | mvp §2·§7-3·4, PRD R05 | 상위 개념·방법을 경험에 연결, 외부 근거를 개념·방법·검증과 연결 | 부분 | concept·method 페이지와 관계는 저장 가능하나 선정·연결 지침 없음. 조사 근거는 경험 페이지에만 연결. Phase 4 |
 | mvp §7-5 | 영향받은 목차 요약만 갱신 | 부분 | 목차는 계획에 직접 쓸 때만 생성·연결. 저장 시 자동 갱신 단계 없음. Phase 4 |
-| 13 | UI 수정 검증 | 미구현 | Phase 3 |
+| 13 | UI 수정 검증 | 구현 | Playwright Chromium E2E 9건: 본문·관계·정의 수정이 CLI read·query에 반영, 해제·병합 후 참조·근거 보존, 버전 충돌, 피드백, 조인 경로 강조, Markdown 정화 |
 | 13 | 100/1,000/10,000페이지 성능 측정 | 부분 | 합성 1,000페이지 참고 측정(query p95 46ms)만 수행. 정식 측정은 Phase 4 |

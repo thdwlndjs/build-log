@@ -75,6 +75,41 @@
 - "이 기록 공식 문서 근거 조사해줘" → Antigravity로 조사해 출처를 연결
 - "buildlog에서 `<id>` 읽어줘" → Markdown으로 보여줌
 
+## 그래프 검토 화면
+
+```powershell
+.\.venv\Scripts\python.exe -m buildlog serve --open          # 이 창에서 실행, Ctrl+C로 종료
+.\.venv\Scripts\python.exe -m buildlog serve --detach        # 백그라운드 실행 후 주소 반환
+.\.venv\Scripts\python.exe -m buildlog serve --status | --stop
+```
+
+- 주소는 `http://127.0.0.1:8765/`(`--port`로 변경)이고, loopback 주소에만 바인딩합니다. 외부 CDN 없이 저장소에 포함된 Cytoscape.js·marked·DOMPurify를 씁니다.
+- `?run=<run_id>`로 특정 저장 결과, `?focus=<page_id>`로 한 페이지의 주변, `?q=<검색어>`로 검색 결과를 엽니다. 서버가 떠 있으면 `ingest` 결과의 `graph.url`에 그 저장의 주소가 들어갑니다. 서버가 없으면 `null`이고 시작 명령만 알려줍니다.
+- 노드를 누르면 본문·용어·규칙·조인 경로를, 연결선을 누르면 관계 설명·근거를 봅니다. 그 자리에서 다음 작업을 할 수 있습니다.
+  - 본문·요약·상태, 용어 정의·맥락·별칭, 관계 종류·방향·설명, 규칙, 조인 경로 수정
+  - 관계 연결 해제
+  - 중복 페이지 병합
+  - 피드백 남기기
+  - 조인 경로 강조
+- 모든 수정은 `expected_version`을 확인합니다. 그사이 다른 곳(CLI, 다른 탭)에서 바뀌었으면 덮어쓰지 않고 `VERSION_CONFLICT`를 보여줍니다.
+- 본문만 고치면 요약에 "갱신 필요" 표시가 붙고, 검색에는 새 본문이 바로 반영됩니다.
+- 수정 요청은 서버가 페이지에 넣어 준 세션 토큰과 같은 Origin일 때만 받습니다. 저장된 Markdown 속 HTML은 글자로 보여 주고, 렌더링 결과도 DOMPurify로 정화합니다.
+
+CLI로 같은 작업을 하려면:
+
+```powershell
+.\.venv\Scripts\python.exe -m buildlog unlink <relation_id> --expected-version 1 --reason "이유"
+.\.venv\Scripts\python.exe -m buildlog feedback add <id> --expected-version 1 --text "틀린 점"
+.\.venv\Scripts\python.exe -m buildlog feedback list --status open
+.\.venv\Scripts\python.exe -m buildlog merge <대표_id> <중복_id> --expected-version <대표_id>=1 --expected-version <중복_id>=1 --reason "이유"
+.\.venv\Scripts\python.exe -m buildlog update <id> --expected-version 2 --patch .\patch.json --reason "이유" --feedback <feedback_id>
+```
+
+- 해제한 관계는 조회·검색·그래프에서 빠지지만 행, 근거, 이력은 남고, 이후 같은 내용을 저장해도 되살아나지 않습니다(경고만 냄).
+- 병합하면 중복 페이지는 `superseded`가 되고 대표 페이지로 redirect됩니다. 옛 ID로 `read`하거나 저장 계획에서 참조해도 대표로 연결됩니다. 관계는 대표로 옮겨지고, 같은 의미의 관계는 근거를 합쳐 하나로 남기며, 자기 자신을 가리키게 되는 관계는 해제됩니다. 근거, 용어, 규칙, 목차, 조사 요청도 옮겨집니다. 대표 페이지의 본문은 자동으로 다시 쓰지 않습니다.
+
+브라우저 E2E 테스트에는 Playwright가 필요합니다: `pip install -e .[dev]` 후 `python -m playwright install chromium`. 설치되지 않았으면 해당 테스트는 건너뜁니다.
+
 ## 외부 조사 (Antigravity)
 
 `research`는 Antigravity CLI(`agy`)로 공식 문서 등의 근거를 찾아 기록에 출처로 연결합니다. 조사는 `ingest` 트랜잭션 밖에서 실행하므로, 조사가 실패해도 저장한 경험은 사라지지 않습니다.

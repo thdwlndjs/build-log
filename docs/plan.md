@@ -160,7 +160,7 @@ PRD R01–R13의 검증 결과와 실제 실행 근거를 남긴다. 사용자 �
 
 ## 8. 진행 기록
 
-현재 상태: Phase 2.3 완료 및 정합성 보완(2026-10-26), Codex 스킬 설명 보완(2026-10-27). 다음은 Phase 3.
+현재 상태: Phase 3 완료(2026-10-27). 다음은 Phase 4.
 
 ### Phase 1 — 2026-10-26 완료
 
@@ -263,5 +263,42 @@ PRD R01–R13의 검증 결과와 실제 실행 근거를 남긴다. 사용자 �
   - 두 실행 모두 새 저장은 없었다(runs 변화 없음).
 - 관찰: Codex가 명시 호출에서 만든 질의 파일(`%TEMP%\buildlog-query-agy-print.json`)을 지우지 않았다. 스킬 지침은 저장 계획 파일만 지우도록 한다. 검증 후 수동으로 지웠다.
 - 계획 추가: 저장 전 기존 지식 조회, 상위 개념·방법 연결, 목차 갱신을 Phase 4 "저장 흐름 보완"에 넣었다. spec 16절에도 부분 구현으로 표시했다.
+
+### Phase 3 — 2026-10-27 완료
+
+- 저장소: migration 6(schema v6).
+  - 추가: `pages.summary_dirty`, 관계 연결 해제(`removed_at`·`removed_reason`), `feedback`, `page_redirects`
+  - 관계 테이블 재생성: 유일성 제약을 해제되지 않은 관계에만 적용하는 부분 유일 인덱스로 바꿈
+  - 갱신 전 백업: 실제 저장소 `buildlog.v5-backup-20261027.sqlite3`, 데모 저장소 `demo.v5-backup-20261027.sqlite3`. 갱신 후 관계·페이지 수가 같음을 확인했다.
+- 서비스(`update.py`):
+  - 관계 종류·방향 변경, 용어 별칭 교체
+  - 본문만 고치면 summary_dirty 표시
+  - 연결 해제: 이력·근거를 보존하고, 이후 저장이 되살리지 않음
+  - 피드백: 본 버전과 함께 기록하고, 해결한 revision과 연결
+  - 병합: redirect를 남기고 관계·근거·용어·규칙·목차·조사 요청을 이동. 같은 의미의 관계는 근거를 합치고 자기 참조가 되는 관계는 해제. 스키마 페이지 병합은 거부.
+- 읽기·검색: 해제된 관계와 병합된 페이지는 조회·검색·경로·그래프에서 뺀다. 옛 ID는 대표 페이지로 연결된다.
+- 검토 화면:
+  - `graph.py`(그래프 데이터, 상세), `server.py`(127.0.0.1, 세션 토큰·Origin·Host 검사, CSP), `serving.py`(`serve --detach/--status/--stop`, `serve.json`)
+  - `web/`(app.js·app.css·index.html, 번들 라이브러리 Cytoscape.js 3.30.2·marked 12.0.2·DOMPurify 3.1.6과 라이선스)
+- CLI: `serve`, `unlink`, `feedback add|list|status`, `merge`, `update --feedback`. `ingest` 결과의 `graph.url`은 서버가 실제로 떠 있을 때만 채운다.
+- 스킬: 저장 결과에 그래프 진입점(Save 6단계)과 "Review and correct" 절을 추가하고, Claude Code description의 "graph editing 미지원" 문장을 바꿨다. 두 호스트에 재설치했고 Codex 설치본의 짧은 description은 유지됐다.
+- 검증:
+  - 테스트 120개 통과(`test_review.py` 13개, `test_ui_e2e.py` 9개 추가).
+  - 브라우저 E2E: Playwright 1.47.0 + Chromium. 브라우저에서 클릭해 수정한 내용을 별도 프로세스 CLI(`read`, `query`)로 확인했다.
+    - 본문 수정 → read·query 반영, 요약 갱신 필요 표시
+    - 관계 설명과 용어 정의 수정 → read·query 반영
+    - 관계 해제 → 조회·그래프에서 빠지고 근거 수·이력 보존
+    - 병합 → 옛 ID read가 대표로 연결, 근거·용어 이동, 검색 제외
+    - 피드백 → 수정 시 addressed와 revision 연결
+    - CLI가 먼저 수정한 뒤 브라우저 저장 → VERSION_CONFLICT, 덮어쓰지 않음
+    - 조인 경로 강조 → 테이블 3개·연결 2개
+    - 저장된 HTML·script가 실행되지 않음
+    - 모든 시나리오에서 브라우저 콘솔 오류 0건
+  - 실제 프로세스: `serve --detach` → `ingest`의 graph.url → `serve --stop` → graph.url null.
+- 발견해 고친 것:
+  - 해제된 관계의 유일 제약이 재연결을 막는 문제(부분 유일 인덱스로 해결)
+  - Cytoscape 인라인 스타일의 CSP 위반(해시로 허용)
+  - 강조 스타일이 노드 크기를 바꾸던 문제
+- 남은 일(Phase 4): 내보내기·가져오기·DB 백업 CLI, 저장 흐름 보완(저장 전 조회·상위 개념·목차 갱신), 규모 측정, 조사 근거의 원문 URL 문제.
 
 각 Phase를 수행한 구현 에이전트는 이 절에 단계·상태·검증 명령·실행 결과·남은 장애를 갱신한다. 기술적으로 해결할 수 있는 장애는 먼저 해결하고, 사용자 입력 없이는 진행할 수 없을 때만 구체적인 조치를 요청한다.
