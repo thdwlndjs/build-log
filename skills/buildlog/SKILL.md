@@ -29,7 +29,7 @@ You do all the work. Never ask the user to write JSON, copy anything, or run a c
       `follow_up` (a retry, a different cause, or a correction: new page plus a relation to the earlier one — `SUPERSEDES` when it replaces the earlier conclusion, otherwise `RELATED_TO`; set the earlier page's `status` to `superseded` only when it is no longer right),
       `new`. Record the lookup and decision in the plan's `prior_check`. Never claim you checked records you did not read.
    b. **Concepts and methods**: name the one to three concepts or methods a reader needs to reuse this (e.g. "headless CLI result checking", "TLS-inspecting proxy"). Search for existing `concept` / `method` pages and relate the experience to them (`USES`, `DERIVED_FROM`, `SUPPORTS`). Create such a page only when none exists and it explains something the experience itself does not; never one page per term.
-   c. **Table of contents**: if the lookup shows an `index` page the record belongs to, add the record with `index_members` and update that index page's `summary_md` (with `id` + `expected_version`) so it mentions the new record. Change no other index.
+   c. **Table of contents (required)**: every new page — experience, concept, method, source page, and every table a schema source creates — must be in an `index`, or Buildlog rejects the save (`BUNDLE_REQUIRED`). Columns belong to their table and need nothing. Search for `index` pages and put each new page in the one it belongs to with `index_members`, then update that index page's `summary_md` (with `id` + `expected_version`) so it mentions the new page. When no index fits, create a new `index` page for the topic in the same plan; an index with no parent is a top-level bundle. Change no other index. A `BUNDLE_MISSING` warning means an existing page you updated is in no index: tell the user and add it to one.
 2. Write the save plan as a UTF-8 JSON file. Follow [plan-format.md](plan-format.md). `idempotency_key`: `{{KEY_PREFIX}}:<YYYY-MM-DD>:<short-kebab-slug>`.
    - Pass files as `path` sources; Buildlog reads them, keeps their text, and parses DDL / schema JSON / samples itself.
    - Every non-inferred evidence `excerpt` must be copied exactly from its source text (whitespace may differ). Buildlog rejects excerpts it cannot find. Your own reasoning is evidence with `evidence_kind: "inferred"`.
@@ -151,7 +151,7 @@ The CLI prints a JSON envelope `{"status": "error", "error": "..."}` on stderr. 
 
 | Exit | Meaning | What to do |
 | --- | --- | --- |
-| 2 | Invalid plan (missing field, excerpt not found, unsupported claim, unknown reference, credential), or `BUDGET_TOO_SMALL` | Fix and retry (Save step 4 / Search step 4) |
+| 2 | Invalid plan (missing field, excerpt not found, unsupported claim, unknown reference, credential, new page in no index `BUNDLE_REQUIRED`), or `BUDGET_TOO_SMALL` | Fix and retry (Save step 4 / Search step 4) |
 | 3 | Conflict: `IDEMPOTENCY_CONFLICT`, `VERSION_CONFLICT`, `SCHEMA_CONFLICT`, `TERM_CONFLICT`, `JOIN_PATH_CONFLICT`, `RULE_CONFLICT` | Do not overwrite. Tell the user what already exists (the message names it) and ask how to proceed |
 | 4 | Not found (ID, table, run, or store) | Tell the user; for a lost ID, search instead |
 | 5 | `RESEARCH_FAILED` | Research step 4 |

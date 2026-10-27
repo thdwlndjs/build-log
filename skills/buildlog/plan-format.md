@@ -80,7 +80,9 @@ Update only the fields that changed, including the summary when the body changes
 {"index": "toc", "child": "p1", "position": 1}
 ```
 
-`index` must be an `index` page. Cycles are rejected.
+`index` must be an `index` page (a ref or an existing page ID). Cycles are rejected.
+
+Required: every page the plan creates must end up in an index — `experience`, `concept`, `method`, `source` pages and the tables a schema source creates (refer to them as `system:table`). Otherwise the save is rejected with `BUNDLE_REQUIRED` and nothing is stored. Exempt: columns (they belong to their table) and an `index` page with no parent, which is a top-level bundle. Updating an existing page that is in no index gives a `BUNDLE_MISSING` warning; add it to an index in a later plan.
 
 ## terms
 
