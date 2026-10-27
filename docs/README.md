@@ -82,7 +82,7 @@
 - "이 기록 공식 문서 근거 조사해줘" → Antigravity로 조사해 출처를 연결
 - "buildlog에서 `<id>` 읽어줘" → Markdown으로 보여줌
 
-## 그래프 검토 화면
+## 작업 공간 화면
 
 ```powershell
 .\.venv\Scripts\python.exe -m buildlog serve --open          # 이 창에서 실행, Ctrl+C로 종료
@@ -90,19 +90,20 @@
 .\.venv\Scripts\python.exe -m buildlog serve --status | --stop
 ```
 
-- 주소는 `http://127.0.0.1:8765/`(`--port`로 변경)이고, loopback 주소에만 바인딩합니다. 외부 CDN 없이 저장소에 포함된 Cytoscape.js·marked·DOMPurify를 씁니다.
-- `?run=<run_id>`로 특정 저장 결과, `?focus=<page_id>`로 한 페이지의 주변, `?q=<검색어>`로 검색 결과를 엽니다. 서버가 떠 있으면 `ingest` 결과의 `graph.url`에 그 저장의 주소가 들어갑니다. 서버가 없으면 `null`이고 시작 명령만 알려줍니다.
-- 노드를 누르면 본문·용어·규칙·조인 경로를, 연결선을 누르면 관계 설명·근거를 봅니다. 그 자리에서 다음 작업을 할 수 있습니다.
-  - 본문·요약·상태, 용어 정의·맥락·별칭, 관계 종류·방향·설명, 규칙, 조인 경로 수정
-  - 관계 연결 해제
-  - 중복 페이지 병합
-  - 피드백 남기기
-  - 조인 경로 강조
-- 모든 수정은 `expected_version`을 확인합니다. 그사이 다른 곳(CLI, 다른 탭)에서 바뀌었으면 덮어쓰지 않고 `VERSION_CONFLICT`를 보여줍니다.
-- 본문만 고치면 요약에 "갱신 필요" 표시가 붙고, 검색에는 새 본문이 바로 반영됩니다.
+- 주소는 `http://127.0.0.1:8765/`(`--port`로 변경)이고, loopback 주소에만 바인딩합니다. 외부 CDN 없이 저장소에 포함된 Cytoscape.js·marked·DOMPurify·lucide 아이콘을 씁니다.
+- 화면 배치는 기준 화면 `reperence/buildlog-workbench.html`을 따릅니다: 제목줄, 왼쪽 탐색기, 가운데 탭 작업 영역(문서), 오른쪽 속성(주변 연결 그래프와 정보·이력·근거), 아래 상태줄.
+- 문서 탭에서는 문서와 그 주변 그래프를 함께 봅니다. 주변 그래프의 노드나 "관련 문서"를 누르면 그 문서가 새 탭으로 열리고 그래프도 그 문서를 따라갑니다.
+- 주소: `?tab=doc:<page_id>`가 문서 탭입니다. 탭을 옮길 때마다 기록이 쌓여 뒤로·앞으로 가기와 직접 링크가 됩니다. 예전 주소 `?open=<page_id>`, `?focus=<page_id>`도 그 문서 탭으로 열립니다. 열린 탭 목록은 브라우저에 기억됩니다.
+- 본문 수정: 도구줄 [본문 수정] → 입력 → [저장]. 새 버전으로 기록되고 이력 탭에 남습니다. 본문만 바뀌므로 요약에 "갱신 필요" 표시가 붙고, 검색에는 새 본문이 바로 반영됩니다.
+- 모든 수정은 `expected_version`을 확인합니다. 그사이 다른 곳(CLI, 다른 탭)에서 바뀌었으면 덮어쓰지 않고 `VERSION_CONFLICT`를 상태줄에 보여줍니다. 입력한 내용은 그대로 남습니다.
 - 수정 요청은 서버가 페이지에 넣어 준 세션 토큰과 같은 Origin일 때만 받습니다. 저장된 Markdown 속 HTML은 글자로 보여 주고, 렌더링 결과도 DOMPurify로 정화합니다.
+- 연결 진행 상황(plan.md Phase 5):
+  - 5-3: 문서·관련 문서·주변 그래프·정보·이력·근거·본문 수정
+  - 5-4 예정: 탐색기 세션·소스, 전체 문서, 검색, 소스 탭
+  - 5-5 예정: 전체 그래프와 저장 결과 주소 `?run=<run_id>`(`ingest` 결과의 `graph.url`), 설정
+- 이전 검토 화면의 기능 중 작업 공간에 아직 연결하지 않은 것(제목·요약·상태 수정, 관계·용어·규칙·조인 경로 수정, 연결 해제, 병합, 피드백, 조인 경로 강조)은 아래 CLI로 합니다. 연결 여부는 [workbench-menu-draft.md](workbench-menu-draft.md)에 정리했습니다.
 
-CLI로 같은 작업을 하려면:
+CLI로 하려면:
 
 ```powershell
 .\.venv\Scripts\python.exe -m buildlog unlink <relation_id> --expected-version 1 --reason "이유"

@@ -5,6 +5,7 @@
 - 작업 공간은 기준 화면 [reperence/buildlog-workbench.html](../reperence/buildlog-workbench.html) 그대로 만든다(spec §10.2). 기준 화면에 위치가 없는 기능은 Phase 5에서 작업 공간에 넣지 않는다.
 - 연결하지 않은 기능도 지우지 않는다. API·서버 함수·CLI는 그대로 두고, 그 테스트(`test_review` 등)도 계속 실행한다. 기존 검토 화면을 별도 주소로 운영하지는 않는다.
 - QA는 `buildlog serve --detach`로 로컬에서 띄운 작업 공간에서 한다.
+- Phase 3 검토 화면의 코드(폼·대화 상자)는 Phase 5-3에서 작업 공간으로 교체됐다. 연결할 때 재사용하려면 교체 직전 커밋에서 꺼낸다: `git show 3972750:src/buildlog/web/app.js` (`index.html`, `app.css`도 같은 방식).
 
 ## 1. Phase 5에서 작업 공간에 연결하는 기능
 
@@ -16,7 +17,7 @@
 | 주변 그래프 펼치기 | '주변 펼치기' 버튼 → 큰 그래프를 그 노드 중심으로 | 문서 탭 오른쪽 "주변 연결" | `GET /api/graph?focus=` |
 | 본문 수정 | '편집' 탭에서 제목·요약·본문·상태를 함께 수정 | 도구줄 [본문 수정] → 본문(`body_md`)만 수정·저장·취소 | `PATCH /api/pages/{id}` |
 | 이력 | '이력' 탭(버전·시각·이유) | 오른쪽 [이력] | `GET /api/objects/{id}` |
-| 근거 | 본문 Markdown 안의 출처 절 | 오른쪽 [근거] → 소스 탭 | `GET /api/objects/{id}`, `GET /api/sources/{id}` |
+| 근거 | 본문 Markdown 안의 출처 절 | 오른쪽 [근거] → 소스 탭(5-3은 근거 목록과 소스 탭 열기까지, 소스 내용은 5-4) | `GET /api/objects/{id}`, `GET /api/sources/{id}` |
 | 전체 그래프 | 처음 화면(최근 저장 실행 주변) | 탭 줄 [전체 그래프] | `GET /api/graph?mode=all` |
 | 저장 실행 링크 | `?run=<id>`로 그 실행의 그래프 | `?run=<id>` → 전체 그래프 탭의 저장 실행 보기 | `GET /api/graph?run=` |
 

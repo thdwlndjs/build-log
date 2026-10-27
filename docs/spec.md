@@ -164,7 +164,7 @@ JSON envelope는 schema_version, request_id, status, data, warnings, error를 �
 | GET /api/health | 서버·저장소 확인 | Phase 3 |
 | GET /api/graph | 최근 실행(`run`)·주변(`focus`)·검색(`q`) 그래프. `types`, `columns`, `cap_nodes`, `cap_edges`. 응답은 생략한 노드·연결 수(`truncated`)를 담는다. cursor는 제공하지 않는다 | Phase 3 |
 | GET /api/graph?mode=all | 저장소 전체를 최근 수정 순으로 표시 한도까지. 병합으로 대체된 페이지 제외, 컬럼은 `columns=1`일 때만 | Phase 5 |
-| GET /api/objects/{id} | 페이지·관계·용어·규칙·조인 경로의 상세(레코드, 렌더된 Markdown, 이력 20건, 피드백, 병합 내역) | Phase 3 |
+| GET /api/objects/{id} | 페이지·관계·용어·규칙·조인 경로의 상세(레코드, 렌더된 Markdown, 이력 20건, 피드백, 병합 내역). Phase 5-3에서 `document_md`(페이지의 본문·테이블 구조·규칙·용어·조인 경로·외부 조사. 제목·요약·관계·목차·근거는 작업 공간이 따로 표시)와 근거의 `source_id`를 추가. CLI Markdown은 그대로 | Phase 3 |
 | GET /api/pages/{id}, /relations/{id}, /terms/{id}, /rules/{id}, /paths/{id} | `/api/objects/{id}`와 같고 유형이 다르면 404 | Phase 3 |
 | GET /api/search | `query`와 같은 검색(`q`, `scope`) | Phase 3 |
 | GET /api/paths | 조인 경로·조건·주의점(`system`, `from`, `to`, `purpose`) | Phase 3 |
@@ -207,7 +207,7 @@ JSON envelope는 schema_version, request_id, status, data, warnings, error를 �
 - 본문 수정은 `PATCH /api/pages/{id}`로 `body_md`만 바꾼다. 미리보기는 두지 않는다. 버전 충돌은 기존처럼 거부하고 상태줄에 알린다.
 - 그래프 노드를 누르면 그 문서 탭을 열고 주변 연결을 다시 그린다.
 - 근거 탭의 출처를 누르면 소스 탭을 연다.
-- URL은 현재 탭(`?tab=doc:<id>`, `session:<id>`, `source:<id>`, `list`, `graph`, `settings`)을 담고 탭을 바꿀 때 기록을 쌓는다. 뒤로·앞으로 가기와 직접 링크는 같은 탭을 연다. `?run=<id>`는 전체 그래프 탭의 저장 실행 보기로, `?open=<id>`는 그 문서 탭으로 연다(기존 링크 호환). 열린 탭 목록은 브라우저 저장소에 두며, 저장하지 못해도 화면은 동작한다.
+- URL은 현재 탭(`?tab=doc:<id>`, `session:<id>`, `source:<id>`, `list`, `graph`, `settings`)을 담고 탭을 바꿀 때 기록을 쌓는다. 뒤로·앞으로 가기와 직접 링크는 같은 탭을 연다. `?run=<id>`는 전체 그래프 탭의 저장 실행 보기로, `?open=<id>`·`?focus=<id>`는 그 문서 탭으로 연다(기존 링크 호환). 주소 없이 처음 열면 최근 저장 실행의 문서를 연다. 열린 탭 목록은 브라우저 저장소에 두며, 저장하지 못해도 화면은 동작한다.
 - 아이콘은 사용하는 것만 자산으로 번들링한다(외부 CDN 없음).
 - 소속 없는 문서는 숨기지 않는다. 상태줄에 경고하고 전체 문서·검색으로 열 수 있다. 정리는 저장 계획으로 한다(§3, §6).
 
@@ -333,4 +333,4 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 13 | PRD R01–R13 검증 근거 | 구현 | docs/verification.md: 요구별 테스트와 실제 실행 기록 |
 | 3·6 | 모든 문서의 묶음 소속, 소속 없는 새 문서 거부(`BUNDLE_REQUIRED`), 기존 누락 경고(`BUNDLE_MISSING`) | 구현(Phase 5-2) | `ingest.py` 커밋 전 검사, `tests/test_bundles.py`. 스킬 목차 단계 필수화. 기존 누락(실사용 3건, 데모 2건)은 승인된 배치대로 정리해 0건. v1 단일 페이지 계획은 목차를 지정할 수 없어 index가 아닌 새 페이지를 만들 수 없다(이미 저장된 v1 실행의 재호출은 기존 결과를 그대로 돌려준다) |
 | 10.1·10.3 | 작업 공간용 조회 API(pages·sessions·sources·settings, graph `mode=all`) | 미구현(Phase 5) | 계약 테스트 `tests/test_browse.py` |
-| 10.2 | 작업 공간 화면 | 미구현(Phase 5) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외) |
+| 10.2 | 작업 공간 화면 | 부분(Phase 5-3) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외)의 CSS·배치를 옮김. 연결됨: 제목줄·탭 줄·도구줄·상태줄·URL, 문서 탭(본문·관련 문서·주변 그래프·정보·이력·근거·본문 수정). 미연결(5-4·5-5): 탐색기 세션·소스, 전체 문서, 검색, 소스·세션 탭, 전체 그래프, 설정. 이 화면들은 기준 위치에 "연결 예정"으로 표시 |
