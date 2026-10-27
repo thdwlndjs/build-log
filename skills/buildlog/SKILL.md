@@ -1,6 +1,6 @@
 ---
 name: buildlog
-description: The user's local Buildlog knowledge store. Search it for past experiences and data-system knowledge relevant to the current task (similar errors, fixes, table structures, join paths, required query conditions, prohibitions, unsupported operations), save new knowledge into it, research supporting sources with Antigravity, and read or correct stored records. Saves (1) an experience from the current conversation — problem, environment, evidence, mitigation, RCA — and (2) material the user points to — Markdown/text documents, SQL DDL, schema JSON, CSV/JSON samples — as tables, columns, terms, relations, join paths and rules. Use when the user asks to search, look up, save, ingest, or research with Buildlog (빌드로그에서 찾아줘 / 저장 / 인제스트 / 근거 조사), asks whether a problem was seen before, or asks to read a Buildlog record by ID. Not for graph editing (not available yet).
+description: The user's local Buildlog knowledge store. Search it for past experiences and data-system knowledge relevant to the current task (similar errors, fixes, table structures, join paths, required query conditions, prohibitions, unsupported operations), save new knowledge into it, research supporting sources with Antigravity, and read or correct stored records. Saves (1) an experience from the current conversation — problem, environment, evidence, mitigation, RCA — and (2) material the user points to — Markdown/text documents, SQL DDL, schema JSON, CSV/JSON samples — as tables, columns, terms, relations, join paths and rules. Use when the user asks to search, look up, save, ingest, or research with Buildlog (빌드로그에서 찾아줘 / 저장 / 인제스트 / 근거 조사), asks whether a problem was seen before, or asks to read a Buildlog record by ID. Also starts the local graph page where the user reviews and corrects records.
 ---
 <!-- installed by `buildlog install-skill` for {{HOST_NAME}}; edit skills/buildlog/ in the Buildlog repository, not this copy -->
 
@@ -33,6 +33,7 @@ You do all the work. Never ask the user to write JSON, copy anything, or run a c
 
 4. If it fails, nothing was stored; the failed attempt is kept on its run (stage reached, error kind, message — see `runs --status failed`). Read the message, fix the plan, and run `ingest` again with the same `idempotency_key`: that is a save retry of the same run. Do not drop content to make it pass; if a claim cannot be supported, lower its status (e.g. `inferred`, cardinality `unknown`, `unconfirmed`) instead.
 5. Report to the user from the JSON result: what was created / updated / unchanged (counts and the main IDs), the overall `status`, each source's `parse_status` and diagnostics, every warning, whether the run was `reused`, `research_status`, and the store path. If `status` is `partial` (envelope status `partial`), say plainly which sources were only partly read (`partial_sources`) and what was left out; do not call it a complete save. Then delete the plan file.
+6. Graph entry point: if `graph.url` is in the result, give it to the user for review. It is present only while a review server for this store runs; never make up an address. If it is null and the user wants to review the save, start the server with `"{{PYTHON}}" -m buildlog serve --detach` and use the `url` it returns plus `?run=<run_id>`.
 
 ## Search
 
@@ -99,13 +100,31 @@ Use this when the user asks to research or back up a record with sources (근거
 
 The ID may be a page (experience, table, column, document, index), term, relation, join path, or rule. Show the returned Markdown to the user as-is. When the user asks to apply a stored table's knowledge, treat its requirements, prohibitions and unsupported operations as binding.
 
-## Correct a stored item
+## Review and correct
+
+The user reviews in the browser: `"{{PYTHON}}" -m buildlog serve --detach` starts a local server (127.0.0.1) and returns its `url`; `serve --status` and `serve --stop` check and stop it. In the page the user can read nodes and edges, edit text, definitions, relations, rules and join paths, unlink relations, merge duplicates, and leave feedback. Every change is versioned and shows up in the next `read` / `query`.
+
+When the user asks you to make such a change, use the CLI (read the item first for its current version):
+
+```
+"{{PYTHON}}" -m buildlog unlink <relation-id> --expected-version <n> --reason "<why>"
+"{{PYTHON}}" -m buildlog feedback add <id> --expected-version <n> --text "<what is wrong>"
+"{{PYTHON}}" -m buildlog feedback list --status open
+"{{PYTHON}}" -m buildlog merge <target-page-id> <duplicate-page-id>... --expected-version <id>=<n> (for every page) --reason "<why>"
+```
+
+- Unlinking keeps the relation, its evidence and history; a later save does not bring it back.
+- Merging leaves the duplicates as `superseded` with a redirect; their relations, evidence, terms, rules and index entries move to the target. It does not rewrite the target's text: update it afterwards if the merged pages said more.
+- Editing only a page body marks its summary as out of date; update `summary_md` too when the conclusion changed.
+- Open feedback is listed with `feedback list --status open`; pass `--feedback <id>` to `update` or `unlink` when the change addresses it.
+
+### Correct a stored item
 
 ```
 "{{PYTHON}}" -m buildlog update <id> --expected-version <n> --patch "<patch.json>" --reason "<why>"
 ```
 
-Read the item first to get its current version. Allowed patch fields: page `title, summary_md, body_md, status`; term `definition_md, scope, status`; relation `explanation_md, status`; join path `title, purpose, conditions_md, caveats_md, status`; rule `condition_md, instruction_md, reason_md, alternative_md, status, confirmation`.
+Read the item first to get its current version. Allowed patch fields: page `title, summary_md, body_md, status`; term `definition_md, scope, status, aliases`; relation `explanation_md, status, type, reverse` (`reverse: true` flips the direction); join path `title, purpose, conditions_md, caveats_md, status`; rule `condition_md, instruction_md, reason_md, alternative_md, status, confirmation`.
 
 ## Judgment rules
 
