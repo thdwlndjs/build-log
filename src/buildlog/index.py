@@ -48,8 +48,10 @@ def _document(c: sqlite3.Connection, page: sqlite3.Row) -> tuple[str, str, str, 
 
 
 def _write(c: sqlite3.Connection, page: sqlite3.Row) -> None:
+    c.execute("DELETE FROM search_index WHERE page_id = ?", (page["id"],))
+    if c.execute("SELECT 1 FROM page_redirects WHERE from_page_id = ?", (page["id"],)).fetchone():
+        return  # merged into another page: only the representative is searchable
     page_id, title, aliases, summary, body, extra = _document(c, page)
-    c.execute("DELETE FROM search_index WHERE page_id = ?", (page_id,))
     c.execute("INSERT INTO search_index(page_id, title, aliases, summary, body, extra) VALUES (?, ?, ?, ?, ?, ?)",
               (page_id, title, aliases, summary, body, extra))
 

@@ -235,7 +235,65 @@ MIGRATIONS: list[list[str]] = [
         "ALTER TABLE runs ADD COLUMN error_kind TEXT",
         "ALTER TABLE runs ADD COLUMN plan_summary_json TEXT",
     ],
+    # 6: review and feedback (Phase 3): stale summaries, unlinked relations, feedback, merges.
+    [
+        # 1 while the body was edited without its summary; search uses the new body at once.
+        "ALTER TABLE pages ADD COLUMN summary_dirty INTEGER NOT NULL DEFAULT 0",
+        # Unlinking keeps the row and its history; removed relations are hidden from reads and search.
+        # The table is rebuilt so that uniqueness applies only to relations still linked: an unlinked
+        # row must not block re-pointing or re-creating the same relation later.
+        """CREATE TABLE relations_v6 (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES pages(id),
+            target_id TEXT NOT NULL REFERENCES pages(id),
+            type TEXT NOT NULL,
+            explanation_md TEXT NOT NULL,
+            status TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            removed_at TEXT,
+            removed_reason TEXT
+        )""",
+        """INSERT INTO relations_v6(id, source_id, target_id, type, explanation_md, status, version, created_at, updated_at)
+           SELECT id, source_id, target_id, type, explanation_md, status, version, created_at, updated_at FROM relations""",
+        "DROP TABLE relations",
+        "ALTER TABLE relations_v6 RENAME TO relations",
+        "CREATE INDEX relations_target ON relations(target_id)",
+        "CREATE UNIQUE INDEX relations_linked_unique ON relations(source_id, target_id, type) WHERE removed_at IS NULL",
+        """CREATE TABLE feedback (
+            id TEXT PRIMARY KEY,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            target_version INTEGER NOT NULL,
+            feedback_text TEXT NOT NULL,
+            status TEXT NOT NULL,
+            resulting_revision TEXT REFERENCES revisions(id),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX feedback_target ON feedback(target_id)",
+        """CREATE TABLE page_redirects (
+            from_page_id TEXT PRIMARY KEY REFERENCES pages(id),
+            to_page_id TEXT NOT NULL REFERENCES pages(id),
+            reason TEXT NOT NULL,
+            merged_at TEXT NOT NULL
+        )""",
+    ],
 ]
+FEEDBACK_STATUSES = {"open", "addressed", "dismissed"}
+
+
+def resolve_redirect(connection: sqlite3.Connection, page_id: str) -> str:
+    """Follow merge redirects to the page that now represents this id."""
+    seen = set()
+    while page_id not in seen:
+        seen.add(page_id)
+        row = connection.execute("SELECT to_page_id FROM page_redirects WHERE from_page_id = ?", (page_id,)).fetchone()
+        if row is None:
+            return page_id
+        page_id = row["to_page_id"]
+    return page_id
 RUN_STAGES = ("received", "normalized", "planned", "committed")
 RESEARCH_STATUSES = {"pending", "running", "succeeded", "failed"}
 SCHEMA_VERSION = len(MIGRATIONS)

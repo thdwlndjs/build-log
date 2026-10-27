@@ -144,7 +144,7 @@ def _page_system(c: sqlite3.Connection, page_id: str) -> str | None:
 def _neighbor_systems(c: sqlite3.Connection, page_id: str) -> set[str]:
     rows = c.execute("""SELECT so.system_key FROM relations r JOIN schema_objects so
                         ON so.page_id = CASE WHEN r.source_id = ? THEN r.target_id ELSE r.source_id END
-                        WHERE (r.source_id = ? OR r.target_id = ?) AND r.status != 'rejected'""", (page_id, page_id, page_id))
+                        WHERE (r.source_id = ? OR r.target_id = ?) AND r.status != 'rejected' AND r.removed_at IS NULL""", (page_id, page_id, page_id))
     return {r[0].casefold() for r in rows}
 
 
@@ -206,7 +206,7 @@ def _conflicts(c: sqlite3.Connection, page_ids: list[str]) -> list[dict[str, Any
     rows = c.execute(f"""SELECT r.*, s.title AS source_title, s.status AS source_status, t.title AS target_title,
                                 t.status AS target_status
                          FROM relations r JOIN pages s ON s.id = r.source_id JOIN pages t ON t.id = r.target_id
-                         WHERE r.type IN ({types}) AND r.status != 'rejected'
+                         WHERE r.type IN ({types}) AND r.status != 'rejected' AND r.removed_at IS NULL
                            AND (r.source_id IN ({marks}) OR r.target_id IN ({marks}))
                          ORDER BY r.type, s.title""", (*_CONFLICT_TYPES, *page_ids, *page_ids)).fetchall()
     return [dict(r) for r in rows]
@@ -227,6 +227,8 @@ def query(store: Path, text: str, terms: list[str] | None = None, scope: str | N
         rows = _candidates(c, all_terms)
         scored = []
         for page_id, row in rows.items():
+            if c.execute("SELECT 1 FROM page_redirects WHERE from_page_id = ?", (page_id,)).fetchone():
+                continue  # merged pages are found through their representative
             score, matched = _score(row, all_terms)
             if not matched:
                 continue
@@ -279,7 +281,7 @@ def query(store: Path, text: str, terms: list[str] | None = None, scope: str | N
             marks_sel = ",".join("?" * len(selected_ids))
             for r in c.execute(f"""SELECT r.type, r.status, r.explanation_md, r.source_id, r.target_id, p.id AS other_id, p.title, p.summary_md, p.type AS page_type
                                    FROM relations r JOIN pages p ON p.id = CASE WHEN r.source_id IN ({marks_sel}) THEN r.target_id ELSE r.source_id END
-                                   WHERE (r.source_id IN ({marks_sel}) OR r.target_id IN ({marks_sel})) AND r.type != 'PART_OF' AND r.status != 'rejected'
+                                   WHERE (r.source_id IN ({marks_sel}) OR r.target_id IN ({marks_sel})) AND r.type != 'PART_OF' AND r.status != 'rejected' AND r.removed_at IS NULL
                                    ORDER BY CASE r.type WHEN 'CONTRADICTS' THEN 0 WHEN 'SUPERSEDES' THEN 1 ELSE 2 END, p.title""",
                                 (*selected_ids, *selected_ids, *selected_ids)):
                 if r["other_id"] in selected_ids or any(x["id"] == r["other_id"] for x in related):
@@ -407,7 +409,7 @@ def neighbors(store: Path, page_id: str, rel_type: str | None = None, direction:
             if direction not in {label, "both"}:
                 continue
             sql = f"""SELECT r.*, p.title AS other_title, p.type AS other_type FROM relations r JOIN pages p ON p.id = r.{other}
-                      WHERE r.{side} = ? AND r.status != 'rejected'""" + (" AND r.type = ?" if rel_type else "") + " ORDER BY r.type, p.title"
+                      WHERE r.{side} = ? AND r.status != 'rejected' AND r.removed_at IS NULL""" + (" AND r.type = ?" if rel_type else "") + " ORDER BY r.type, p.title"
             for r in c.execute(sql, (page_id, rel_type) if rel_type else (page_id,)):
                 items.append({"direction": label, "relation_id": r["id"], "type": r["type"], "status": r["status"],
                               "other_id": r[other], "other_title": r["other_title"], "other_type": r["other_type"],
@@ -469,7 +471,7 @@ def paths(store: Path, system_key: str, from_table: str, to_table: str, purpose:
             names = {r["page_id"]: json.loads(r["metadata_json"])["name"]
                      for r in c.execute("SELECT * FROM schema_objects WHERE object_type = 'table' AND lower(system_key) = lower(?)", (system_key,))}
             edges: dict[str, list[dict[str, Any]]] = {}
-            for r in c.execute("SELECT * FROM relations WHERE type = 'JOINS_TO' AND status != 'rejected'"):
+            for r in c.execute("SELECT * FROM relations WHERE type = 'JOINS_TO' AND status != 'rejected' AND removed_at IS NULL"):
                 if r["source_id"] in names and r["target_id"] in names:
                     edge = {"relation_id": r["id"], "status": r["status"], "explanation_md": r["explanation_md"]}
                     edges.setdefault(r["source_id"], []).append(edge | {"to": r["target_id"], "direction": "forward"})

@@ -74,9 +74,9 @@ def _page_record(c: sqlite3.Connection, page: dict[str, Any]) -> dict[str, Any]:
     for path in join_paths:
         path["steps"] = json.loads(path.pop("steps_json"))
     outgoing = _rows(c, """SELECT r.*, p.title AS other_title, p.type AS other_type FROM relations r JOIN pages p ON p.id = r.target_id
-                           WHERE r.source_id = ? AND r.type != 'PART_OF' ORDER BY r.type, p.title""", (page_id,))
+                           WHERE r.source_id = ? AND r.type != 'PART_OF' AND r.removed_at IS NULL ORDER BY r.type, p.title""", (page_id,))
     incoming = _rows(c, """SELECT r.*, p.title AS other_title, p.type AS other_type FROM relations r JOIN pages p ON p.id = r.source_id
-                           WHERE r.target_id = ? AND r.type != 'PART_OF' ORDER BY r.type, p.title""", (page_id,))
+                           WHERE r.target_id = ? AND r.type != 'PART_OF' AND r.removed_at IS NULL ORDER BY r.type, p.title""", (page_id,))
     children = _rows(c, """SELECT p.id, p.title, p.type, m.position FROM index_members m JOIN pages p ON p.id = m.child_page_id
                            WHERE m.index_page_id = ? ORDER BY m.position""", (page_id,))
     parents = _rows(c, """SELECT p.id, p.title FROM index_members m JOIN pages p ON p.id = m.index_page_id
@@ -103,6 +103,11 @@ def read_object(store: Path, object_id: str) -> dict[str, Any]:
     with closing(db.connect(store)) as c:
         page = c.execute("SELECT * FROM pages WHERE id = ?", (object_id,)).fetchone()
         if page is not None:
+            target = db.resolve_redirect(c, object_id)
+            if target != object_id:  # merged: show the representative page
+                record = _page_record(c, dict(c.execute("SELECT * FROM pages WHERE id = ?", (target,)).fetchone()))
+                record["redirected_from"] = object_id
+                return record
             return _page_record(c, dict(page))
         for object_type, table in OBJECT_TABLES.items():
             row = c.execute(f"SELECT * FROM {table} WHERE id = ?", (object_id,)).fetchone()
@@ -268,9 +273,14 @@ def _render_page(record: dict[str, Any], include_rules: bool = True) -> list[str
     lines = [
         f"# {page['title']}", "",
         f"- ID: `{page['id']}`", f"- Type: `{page['type']}`", f"- Status: `{page['status']}`",
-        f"- Version: {page['version']}", f"- Updated: {page['updated_at']}", "",
-        "## 요약", "", page["summary_md"],
+        f"- Version: {page['version']}", f"- Updated: {page['updated_at']}",
     ]
+    if record.get("redirected_from"):
+        lines.append(f"- 병합됨: 요청한 `{record['redirected_from']}`은 이 페이지로 병합됐다")
+    lines += ["", "## 요약", ""]
+    if page.get("summary_dirty"):
+        lines += ["> 요약이 최근 본문 수정 전 내용이다. 본문을 기준으로 읽고, 요약은 갱신이 필요하다.", ""]
+    lines.append(page["summary_md"])
     # Schema pages often have only the source description; do not print it twice.
     if page["body_md"].strip() != page["summary_md"].strip():
         lines += ["", "## 기록", "", page["body_md"]]
@@ -331,5 +341,7 @@ def render_markdown(record: dict[str, Any]) -> str:
         r = record["relation"]
         lines = [f"# 관계: {r.get('source_title')} —{r['type']}→ {r.get('target_title')}", "",
                  f"- ID: `{r['id']}` v{r['version']} · 상태: {_status(r['status'])}", f"- 설명: {r['explanation_md']}"]
+        if r.get("removed_at"):
+            lines.append(f"- 연결 해제됨: {r['removed_at']} · 이유: {r.get('removed_reason') or ''}")
         lines += _evidence_lines(r["evidence"], "")
     return "\n".join(lines) + "\n"

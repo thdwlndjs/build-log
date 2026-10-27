@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument("--expected-version", required=True, type=int)
     update_parser.add_argument("--patch", required=True, help="UTF-8 JSON file, or - for stdin")
     update_parser.add_argument("--reason", required=True)
+    update_parser.add_argument("--feedback", help="feedback id this change addresses")
     query_parser = commands.add_parser("query", help="find stored knowledge for a question and return agent-ready Markdown")
     query_parser.add_argument("text", nargs="?", help="the question; or pass --input")
     query_parser.add_argument("--input", help='UTF-8 JSON file or - : {"query", "terms", "scope", "limit", "max_bytes"}')
@@ -107,6 +108,37 @@ def build_parser() -> argparse.ArgumentParser:
     runs_parser = commands.add_parser("runs", help="list save runs with their stage, status and preserved errors")
     runs_parser.add_argument("--status", choices=("running", "failed", "succeeded"))
     runs_parser.add_argument("--limit", type=int, default=20)
+    serve_parser = commands.add_parser("serve", help="local graph review UI on 127.0.0.1")
+    serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=8765)
+    serve_parser.add_argument("--open", action="store_true", help="open the page in the default browser")
+    mode = serve_parser.add_mutually_exclusive_group()
+    mode.add_argument("--detach", action="store_true", help="start in the background and return the address")
+    mode.add_argument("--status", action="store_true", help="report whether a server for this store is running")
+    mode.add_argument("--stop", action="store_true", help="stop the background server of this store")
+    unlink_parser = commands.add_parser("unlink", help="unlink a relation (kept with its history)")
+    unlink_parser.add_argument("relation_id")
+    unlink_parser.add_argument("--expected-version", required=True, type=int)
+    unlink_parser.add_argument("--reason", required=True)
+    unlink_parser.add_argument("--feedback")
+    feedback_parser = commands.add_parser("feedback", help="record or list review feedback")
+    feedback_sub = feedback_parser.add_subparsers(dest="feedback_command", required=True)
+    fb_add = feedback_sub.add_parser("add")
+    fb_add.add_argument("target_id")
+    fb_add.add_argument("--expected-version", required=True, type=int, help="version of the item the feedback is about")
+    fb_add.add_argument("--text", required=True)
+    fb_list = feedback_sub.add_parser("list")
+    fb_list.add_argument("--target")
+    fb_list.add_argument("--status", choices=("open", "addressed", "dismissed"))
+    fb_status = feedback_sub.add_parser("status")
+    fb_status.add_argument("feedback_id")
+    fb_status.add_argument("status", choices=("open", "addressed", "dismissed"))
+    merge_parser = commands.add_parser("merge", help="merge duplicate pages into one representative page")
+    merge_parser.add_argument("target_id")
+    merge_parser.add_argument("source_ids", nargs="+")
+    merge_parser.add_argument("--expected-version", action="append", required=True, metavar="PAGE_ID=VERSION",
+                              help="current version of the target and of every source (repeatable)")
+    merge_parser.add_argument("--reason", required=True)
     return parser
 
 
@@ -142,6 +174,12 @@ def main(argv: list[str] | None = None) -> int:
             data = ingest(store, _load_json(args.input))
             # Saved, but part of the input was not read: never report that as plain "ok".
             status = "partial" if data.get("status") == "partial" else "ok"
+            # A graph address only when a review server for this store is actually running.
+            from .serving import running_url
+
+            url = running_url(store)
+            data["graph"] = ({"url": f"{url}?run={data['run_id']}"} if url else
+                             {"url": None, "start": f'"{sys.executable}" -m buildlog serve --detach'})
             _write(sys.stdout, _envelope(request_id, status, data, data.get("warnings", [])))
             return 0
         elif args.command == "read":
@@ -190,6 +228,41 @@ def main(argv: list[str] | None = None) -> int:
 
             hosts = sorted(HOSTS) if args.host == "all" else [args.host]
             data, warnings = install(hosts, dry_run=args.dry_run), []
+        elif args.command == "serve":
+            from . import serving
+
+            if args.status:
+                data, warnings = serving.status(store), []
+            elif args.stop:
+                data, warnings = serving.stop(store), []
+            elif args.detach:
+                data, warnings = serving.detach(store, args.host, args.port, args.open), []
+            else:
+                return serving.foreground(store, args.host, args.port, args.open, lambda d: _write(sys.stdout, _envelope(request_id, "ok", d)))
+        elif args.command == "unlink":
+            from .update import unlink_relation
+
+            data, warnings = unlink_relation(store, args.relation_id, args.expected_version, args.reason, args.feedback), []
+        elif args.command == "feedback":
+            from .update import add_feedback, list_feedback, set_feedback_status
+
+            if args.feedback_command == "add":
+                data = add_feedback(store, args.target_id, args.expected_version, args.text)
+            elif args.feedback_command == "list":
+                data = list_feedback(store, args.target, args.status)
+            else:
+                data = set_feedback_status(store, args.feedback_id, args.status)
+            warnings = []
+        elif args.command == "merge":
+            from .update import merge_pages
+
+            versions: dict[str, int] = {}
+            for item in args.expected_version:
+                page_id, sep, number = item.partition("=")
+                if not sep or not number.isdigit():
+                    raise ValidationError(f"--expected-version must look like PAGE_ID=VERSION, got {item!r}")
+                versions[page_id] = int(number)
+            data, warnings = merge_pages(store, args.source_ids, args.target_id, versions, args.reason), []
         elif args.command == "reindex":
             if not store.exists():
                 raise NotFoundError(f"store does not exist: {store}")
@@ -200,7 +273,8 @@ def main(argv: list[str] | None = None) -> int:
             patch = _load_json(args.patch)
             if not isinstance(patch, dict):
                 raise ValidationError("patch input must be a JSON object")
-            data, warnings = update_object(store, args.object_id, args.expected_version, patch, args.reason), []
+            data, warnings = update_object(store, args.object_id, args.expected_version, patch, args.reason,
+                                           feedback_id=args.feedback), []
         _write(sys.stdout, _envelope(request_id, "ok", data, warnings))
         return 0
     except ResearchFailed as error:

@@ -215,7 +215,7 @@ class _Apply:
             row = self.c.execute("SELECT id FROM pages WHERE id = ?", (ref,)).fetchone()
             if row is None:
                 raise ValidationError(f"{where}: page {ref} does not exist")
-            return row["id"]
+            return db.resolve_redirect(self.c, row["id"])  # a merged page's id leads to its representative
         if ":" in ref:
             system_key, rest = ref.split(":", 1)
             parts = rest.split(".")
@@ -626,8 +626,22 @@ class _Apply:
         if source_id == target_id:
             raise ValidationError(f"{where}: a relation needs two different pages")
         existing = self.c.execute(
-            "SELECT * FROM relations WHERE source_id = ? AND target_id = ? AND type = ?", (source_id, target_id, rel_type)
+            "SELECT * FROM relations WHERE source_id = ? AND target_id = ? AND type = ? AND removed_at IS NULL",
+            (source_id, target_id, rel_type),
         ).fetchone()
+        if existing is None:
+            unlinked = self.c.execute(
+                """SELECT id, removed_at FROM relations WHERE source_id = ? AND target_id = ? AND type = ? AND removed_at IS NOT NULL
+                   ORDER BY removed_at DESC LIMIT 1""", (source_id, target_id, rel_type)).fetchone()
+            if unlinked is not None:
+                # Someone unlinked this relation on review; a later save must not silently bring it back.
+                self.warnings.append(
+                    f"{where}: relation {unlinked['id']} ({rel_type}) was unlinked on {unlinked['removed_at']}; not restored. "
+                    "Create it again explicitly with update if it is correct after all."
+                )
+                if record:
+                    self.reused.append({"type": "relation", "id": unlinked["id"], "relation_type": rel_type, "unlinked": True})
+                return unlinked["id"]
         if existing is not None:
             self._link_evidence("relation", existing["id"], evidence_ids)
             if existing["explanation_md"] != explanation or existing["status"] != status:
