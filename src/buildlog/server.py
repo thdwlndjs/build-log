@@ -15,6 +15,7 @@ import mimetypes
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import threading
 from http import HTTPStatus
@@ -52,6 +53,14 @@ def _loopback(host: str) -> bool:
 
 class BuildlogServer(ThreadingHTTPServer):
     daemon_threads = True
+    # http.server turns on SO_REUSEADDR, which on Windows lets a second server bind a port that is already
+    # serving; requests then keep reaching the old one. Bind exclusively so a taken port fails loudly.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def __init__(self, store: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
         if not _loopback(host):
@@ -274,4 +283,5 @@ def start_in_thread(store: Path, host: str = "127.0.0.1", port: int = 0) -> Buil
 
 
 def state_file(store: Path) -> Path:
-    return store.parent / "serve.json"
+    # One file per store: two stores in the same folder each have their own server.
+    return store.parent / f"{store.name}.serve.json"

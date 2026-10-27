@@ -314,6 +314,42 @@ class ServeProcessTests(unittest.TestCase):
             plan.write_text(json.dumps(p), encoding="utf-8")
             self.assertIsNone(cli("ingest", "--input", str(plan))["graph"]["url"])  # no address without a server
 
+    def test_two_stores_in_one_folder_have_their_own_server(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            stores = {name: Path(d) / f"{name}.sqlite3" for name in ("a", "b")}
+            for store in stores.values():
+                ingest(store, duplicates_plan())
+            env = {**os.environ, "PYTHONPATH": str(SRC)}
+
+            def cli(name: str, *args: str) -> dict[str, Any]:
+                done = subprocess.run([sys.executable, "-m", "buildlog", "--store", str(stores[name]), *args],
+                                      capture_output=True, env=env, timeout=60)
+                self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+                return json.loads(done.stdout.decode("utf-8"))["data"]
+
+            try:
+                self.assertTrue(cli("a", "serve", "--detach", "--port", "8897")["running"])
+                self.assertTrue(cli("b", "serve", "--detach", "--port", "8898")["running"])
+                self.assertEqual(cli("a", "serve", "--status")["url"], "http://127.0.0.1:8897/")   # not b's
+                self.assertTrue(cli("a", "serve", "--stop")["stopped"])
+                self.assertFalse(cli("a", "serve", "--status")["running"])
+                self.assertEqual(cli("b", "serve", "--status")["url"], "http://127.0.0.1:8898/")   # b keeps running
+            finally:
+                cli("a", "serve", "--stop")
+                cli("b", "serve", "--stop")
+
+    def test_a_port_in_use_is_not_shared(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            store = Path(d) / "s.sqlite3"
+            ingest(store, duplicates_plan())
+            first = start_in_thread(store)
+            try:
+                with self.assertRaises(OSError):
+                    start_in_thread(store, port=first.port)
+            finally:
+                first.shutdown()
+                first.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()
