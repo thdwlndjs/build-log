@@ -43,6 +43,26 @@ def render(text: str, host: str, python: str) -> str:
     return rendered
 
 
+def host_description(rendered: str, host: str, source: Path) -> str:
+    """Swap in `description.<host>.txt` as the SKILL.md frontmatter description, if that file exists.
+
+    Codex lists skills with a shortened description (cut near 650 characters in observed
+    sessions), so it gets its own text with the "use when" part first. Hosts without such a
+    file keep the description from SKILL.md unchanged.
+    """
+    override = source / f"description.{host}.txt"
+    if not override.is_file():
+        return rendered
+    text = " ".join(override.read_text(encoding="utf-8").split())
+    if not text:
+        raise ValidationError(f"{override.name} is empty")
+    head, sep, body = rendered.partition("\n---\n")  # frontmatter ends at the second '---'
+    new_head, count = re.subn(r"^description: .*$", lambda _: f"description: {text}", head, count=1, flags=re.M)
+    if count != 1 or not sep:
+        raise ValidationError("SKILL.md frontmatter has no description line to replace")
+    return new_head + sep + body
+
+
 def install(hosts: list[str], python: str | None = None, source: Path = SOURCE, dry_run: bool = False,
             target_dirs: dict[str, Path] | None = None) -> dict[str, Any]:
     unknown = [h for h in hosts if h not in HOSTS]
@@ -58,6 +78,8 @@ def install(hosts: list[str], python: str | None = None, source: Path = SOURCE, 
         files = []
         for src in sorted(source.glob("*.md")):
             rendered = render(src.read_text(encoding="utf-8"), host, python)
+            if src.name == "SKILL.md":
+                rendered = host_description(rendered, host, source)
             dest = target / src.name
             action, backup = "created", None
             if dest.exists():

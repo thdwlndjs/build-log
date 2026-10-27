@@ -1,0 +1,1 @@
+Use when the user asks to search, save, ingest, research, or correct knowledge in Buildlog (빌드로그에서 찾아줘·저장·인제스트·근거 조사), asks whether a problem or error was seen before, or works with a system whose tables and query rules are stored there. Buildlog is the user's local store of past fixes, schemas, join paths and query rules.

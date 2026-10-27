@@ -48,6 +48,25 @@ class SkillInstallTests(unittest.TestCase):
             again = install(["claude-code"], target_dirs={"claude-code": target})
             self.assertEqual([f["backup"] for f in again["hosts"][0]["files"]], [None, None])
 
+    def test_codex_gets_its_own_short_description_and_claude_code_keeps_the_source(self) -> None:
+        import re
+
+        with tempfile.TemporaryDirectory() as d:
+            targets = {"claude-code": Path(d) / "claude", "codex": Path(d) / "codex"}
+            install(["claude-code", "codex"], python=r"C:\venv\python.exe", target_dirs=targets)
+            source_desc = re.search(r"^description: (.*)$", (SOURCE / "SKILL.md").read_text(encoding="utf-8"), re.M).group(1)
+            claude = (targets["claude-code"] / "SKILL.md").read_text(encoding="utf-8")
+            codex = (targets["codex"] / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(re.search(r"^description: (.*)$", claude, re.M).group(1), source_desc)
+            codex_desc = re.search(r"^description: (.*)$", codex, re.M).group(1)
+            self.assertTrue(codex_desc.startswith("Use when"))
+            self.assertLess(len(codex_desc), 600)  # observed Codex listing cut is near 650
+            # Only the description differs from what the source would give Codex.
+            self.assertEqual(claude.count("\n"), codex.count("\n"))
+            self.assertEqual(codex.split("\n---\n", 1)[1].count("## "), claude.split("\n---\n", 1)[1].count("## "))
+            # The override file itself is not installed.
+            self.assertFalse((targets["codex"] / "description.codex.txt").exists())
+
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / "claude"
