@@ -17,7 +17,7 @@
 | 주변 그래프 펼치기 | '주변 펼치기' 버튼 → 큰 그래프를 그 노드 중심으로 | 문서 탭 오른쪽 "주변 연결" | `GET /api/graph?focus=` |
 | 본문 수정 | '편집' 탭에서 제목·요약·본문·상태를 함께 수정 | 도구줄 [본문 수정] → 본문(`body_md`)만 수정·저장·취소 | `PATCH /api/pages/{id}` |
 | 이력 | '이력' 탭(버전·시각·이유) | 오른쪽 [이력] | `GET /api/objects/{id}` |
-| 근거 | 본문 Markdown 안의 출처 절 | 오른쪽 [근거] → 소스 탭(5-3은 근거 목록과 소스 탭 열기까지, 소스 내용은 5-4) | `GET /api/objects/{id}`, `GET /api/sources/{id}` |
+| 근거 | 본문 Markdown 안의 출처 절 | 오른쪽 [근거] → 소스 탭(원문 또는 저장된 발췌·인용, 연결 문서) | `GET /api/objects/{id}`, `GET /api/sources/{id}` |
 | 전체 그래프 | 처음 화면(최근 저장 실행 주변) | 탭 줄 [전체 그래프] | `GET /api/graph?mode=all` |
 | 저장 실행 링크 | `?run=<id>`로 그 실행의 그래프 | `?run=<id>` → 전체 그래프 탭의 저장 실행 보기 | `GET /api/graph?run=` |
 

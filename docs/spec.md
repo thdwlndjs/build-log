@@ -332,5 +332,5 @@ Codex와 Claude Code 스킬은 호스트별 호출 표기만 다르게 하며 CL
 | 13 | 100/1,000/10,000페이지 성능 측정 | 구현 | 각 30회. 1,000페이지 query p95 106ms, 그래프 API p95 41ms, 10,000페이지 query p95 251ms(docs/benchmark.md) |
 | 13 | PRD R01–R13 검증 근거 | 구현 | docs/verification.md: 요구별 테스트와 실제 실행 기록 |
 | 3·6 | 모든 문서의 묶음 소속, 소속 없는 새 문서 거부(`BUNDLE_REQUIRED`), 기존 누락 경고(`BUNDLE_MISSING`) | 구현(Phase 5-2) | `ingest.py` 커밋 전 검사, `tests/test_bundles.py`. 스킬 목차 단계 필수화. 기존 누락(실사용 3건, 데모 2건)은 승인된 배치대로 정리해 0건. v1 단일 페이지 계획은 목차를 지정할 수 없어 index가 아닌 새 페이지를 만들 수 없다(이미 저장된 v1 실행의 재호출은 기존 결과를 그대로 돌려준다) |
-| 10.1·10.3 | 작업 공간용 조회 API(pages·sessions·sources·settings, graph `mode=all`) | 미구현(Phase 5) | 계약 테스트 `tests/test_browse.py` |
-| 10.2 | 작업 공간 화면 | 부분(Phase 5-3) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외)의 CSS·배치를 옮김. 연결됨: 제목줄·탭 줄·도구줄·상태줄·URL, 문서 탭(본문·관련 문서·주변 그래프·정보·이력·근거·본문 수정). 미연결(5-4·5-5): 탐색기 세션·소스, 전체 문서, 검색, 소스·세션 탭, 전체 그래프, 설정. 이 화면들은 기준 위치에 "연결 예정"으로 표시 |
+| 10.1·10.3 | 작업 공간용 조회 API(pages·sessions·sources·settings, graph `mode=all`) | 부분(Phase 5-4) | `browse.py`: pages·sessions·sessions/{id}·sources·sources/{id} 구현, 계약 테스트 8건 통과. settings·graph `mode=all`은 5-5(계약 테스트 2건 예상 실패로 표시) |
+| 10.2 | 작업 공간 화면 | 부분(Phase 5-4) | 기준 화면 `reperence/buildlog-workbench.html`(래퍼·예시 데이터 제외)의 CSS·배치를 옮김. 연결됨: 제목줄·탭 줄·도구줄·상태줄·URL, 문서 탭(본문·관련 문서·주변 그래프·정보·이력·근거·본문 수정, 5-3), 탐색기 세션·소스와 목록 필터, 세션·소스 탭, 전체 문서, 검색, 근거→소스, 소속 없는 문서 경고(5-4). 미연결(5-5): 전체 그래프, 설정. 기준 위치에 "연결 예정"으로 표시 |
