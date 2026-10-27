@@ -48,12 +48,15 @@ def _document(c: sqlite3.Connection, page: sqlite3.Row) -> tuple[str, str, str, 
 
 
 def _write(c: sqlite3.Connection, page: sqlite3.Row) -> None:
-    c.execute("DELETE FROM search_index WHERE page_id = ?", (page["id"],))
+    # The index row shares the page's rowid, so it is replaced through the rowid key. Matching on
+    # the UNINDEXED page_id column would scan the whole index for every page (quadratic bulk saves).
+    rowid = c.execute("SELECT rowid FROM pages WHERE id = ?", (page["id"],)).fetchone()[0]
+    c.execute("DELETE FROM search_index WHERE rowid = ?", (rowid,))
     if c.execute("SELECT 1 FROM page_redirects WHERE from_page_id = ?", (page["id"],)).fetchone():
         return  # merged into another page: only the representative is searchable
     page_id, title, aliases, summary, body, extra = _document(c, page)
-    c.execute("INSERT INTO search_index(page_id, title, aliases, summary, body, extra) VALUES (?, ?, ?, ?, ?, ?)",
-              (page_id, title, aliases, summary, body, extra))
+    c.execute("INSERT INTO search_index(rowid, page_id, title, aliases, summary, body, extra) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (rowid, page_id, title, aliases, summary, body, extra))
 
 
 def reindex(c: sqlite3.Connection, page_ids: Iterable[str]) -> int:

@@ -280,6 +280,9 @@ MIGRATIONS: list[list[str]] = [
             merged_at TEXT NOT NULL
         )""",
     ],
+    # 7: search index rows now share their page's rowid (replaced by key, not by scanning page_id).
+    # No table changes; the index is rebuilt once so existing rows take the new rowids.
+    [],
 ]
 FEEDBACK_STATUSES = {"open", "addressed", "dismissed"}
 
@@ -298,7 +301,7 @@ RUN_STAGES = ("received", "normalized", "planned", "committed")
 RESEARCH_STATUSES = {"pending", "running", "succeeded", "failed"}
 SCHEMA_VERSION = len(MIGRATIONS)
 # Versions whose migration also needs the search index rebuilt from existing rows.
-REINDEX_AFTER = {3}
+REINDEX_AFTER = {3, 7}
 
 
 def default_store_path() -> Path:
